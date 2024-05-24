@@ -215,7 +215,6 @@ def pointInTriangle2D(A, B, C, P):
         u, v, d = -u, -v, -d
     return u >= 0 and v >= 0 and (u + v) <= d
 
-"""
 def pointInTriangle3D(A, B, C, P):
     u,v,w = B-A, C-B, A-C
     if np.abs(np.dot(P-A, cross(u, v, True))) > eps:
@@ -227,7 +226,6 @@ def pointInTriangle3D(A, B, C, P):
     if np.dot(cross(w, -v, True), cross(w, P-C, True)) < 0:
         return False
     return True
-"""
 
 def pointInTriangles3D(ABCs, P, uvws = None, ns = None, assumeInPlane = False):
     if uvws is None:
@@ -511,7 +509,6 @@ def computeHexaVolumes(ptss):
     #abcs = ptss[:,[1,2,3]] - ptss[:,0].reshape(-1,1,3)
     #defs = ptss[:,[4,5,6]] - ptss[:,7].reshape(-1,1,3)
     #return (np.abs(inner1d(cross(abcs[:,0], abcs[:,1]), abcs[:,2])) + np.abs(inner1d(cross(defs[:,0], defs[:,1]), defs[:,2])))/2
-    #return np.sum([computeHexaVolume(pts) for pts in ptss])
 
 def computePolyhedronCentroid(vertices, faces, returnVolume=False):
     tris = facesToTris(faces)
@@ -645,5 +642,4 @@ def mixFaceDirections(vds, vns, fn, v = False):
     ds = np.sum((d * M)**2, axis=1)
     gamma = r[np.argmin(ds)]
     
-    #return rotateAsToB(Mr3D(0,0,gamma/3)[:-1], fn, np.float32([0,0,1]))
     return rotateAsToB(Mr3D(0,0,gamma)[:,:-1].T, fn, np.float32([0,0,1]))

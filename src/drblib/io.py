@@ -286,64 +286,6 @@ def loadPlyFile(fileName):
     else:
         return verts, faces
 
-def loadFieldFile(fileName):
-    vertices = []
-    verticesNormals = []
-    verticesDirs = []
-    faces = []
-    sIdxs = []
-    with open(fileName, 'r') as fh:
-        for line in fh.readlines():
-            line = line.strip()
-            if line[:2] == 'v ':
-                vertices.append(np.float32(line.split(' ')[1:]))
-            if line[:2] == 'vn':
-                verticesNormals.append(np.float32(line.split(' ')[1:]))
-            if line[:2] == 'f ':
-                if '/' in line:
-                    faces.append(np.int32([f.split('/')[0] for f in line.split(' ')[1:]]))
-                else:
-                    faces.append(np.int32(line.split(' ')[1:]))
-            if '# field ' in line:
-                verticesDirs.append(np.float32(line.split(' ')[3:]))
-            if '# singularity ' in line:
-                sIdxs.append(np.int32(line.split(' ')[2]))
-
-    vs = np.float32(vertices)
-    fs = np.int32(faces)-1
-
-    #vns = np.float32(verticesNormals)
-    tm = trimesh.Trimesh(vs, fs)
-    vns = tm.vertex_normals
-    #ps = vs[fs]
-    #ABAC = ps[:,1:] - ps[:,0].reshape(-1,1,3)
-    #fns = cross(ABAC[:,0], ABAC[:,1], True)
-    fns = tm.face_normals
-
-    vd0s = np.float32(verticesDirs)
-    vd1s = cross(vd0s, vns, True)
-    vd0s = cross(vd1s, vns, True)
-    vds = np.transpose(np.dstack([vd0s,vd1s]), axes=[0,2,1])
-
-    #fd0s = vd0s[fs[:,0]]
-    fds = []
-    for fIdx, f in enumerate(fs):
-        #v0,v1,v2 = vs[f]
-        #vn0,vn1,vn2 = vns[f]
-        #o0,o1,o2 = vds[f]
-        #o0 = rotateAsToB(o0, fns[fIdx], vn0)
-        #o1 = rotateAsToB(o1, fns[fIdx], vn1)
-        #o2 = rotateAsToB(o2, fns[fIdx], vn2)
-
-        o = mixFaceDirections(vds[f], vns[f], fns[fIdx])
-        fds.append(o)
-        #fd0s.append(t0)
-    #fd0s = normVec(np.float32(fd0s))
-    #fd1s = cross(fd0s, fns, True)
-    #fd0s = cross(fd1s, fns, True)
-    
-    return vs, vns, vds, fs, fns, np.float32(fds), np.int32(sIdxs)-1
-
 def writeMeshFile(filePath, vertices, hexas): # hex
     fh = open(filePath, 'w')
     fh.write('MeshVersionFormatted 1\nDimension 3\n')
