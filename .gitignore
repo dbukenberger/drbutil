@@ -1,0 +1,5 @@
+*.pyc
+*.pyd
+*.lprof
+*.egg-info
+dist/*

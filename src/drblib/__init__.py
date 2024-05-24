@@ -1,0 +1,87 @@
+import os
+import sys
+import multiprocessing as mp
+import logging
+import numpy as np
+
+from timeit import default_timer as timer
+
+
+# for visualizing 2D results
+try:
+    import matplotlib.pyplot as plt
+except ImportError:
+    mplFound = False
+else:
+    def simplePlot(xs, ys = None, labels = None):
+        for i, x in enumerate(xs):
+            plt.plot(np.arange(len(x)) if ys is None else ys[i], x)
+        if labels is not None:
+            plt.legend(labels)
+        plt.show()
+
+    mplFound = True
+
+
+# for visualizing 3D results
+try:
+    from mayavi import mlab
+    from traits.api import HasTraits, Range, Instance, on_trait_change
+    from traitsui.api import View, Item, Group
+    from mayavi.core.api import PipelineBase
+    from mayavi.core.ui.api import MayaviScene, SceneEditor, MlabSceneModel
+except ImportError:
+    mlabFound = False
+else:
+    mlabFound = True
+
+
+# show progress in shell
+try:
+    if IN_IDLE:
+        raise RuntimeError
+    from tqdm import tqdm
+except:
+
+    class tqdmDummy:
+        n = 0
+
+        def update(self, x):
+            return
+
+        def close(self):
+            return
+
+    def tqdm(x, **kwargs):
+        return tqdmDummy() if x is None else x
+
+
+# simple logger class
+logging.basicConfig(format='%(message)s')
+class Logger:
+    def __init__(self, logName):
+        self.log = logging.getLogger(logName)
+        self.log.setLevel(logging.INFO)
+        self.log.addHandler(logging.FileHandler(logDir + '%s.log' % logName, mode='w'))
+
+    def logThis(self, msg, args, style=None):
+        tplArgs = args if not hasattr(args, '__len__') or type(args) == str else tuple(args)
+        fmtArgs = style % tplArgs if style is not None else str(tplArgs)
+        self.log.info(msg + ':\t' + fmtArgs)
+
+np.random.seed(23)
+
+# useful global constants
+IN_IDLE = 'idlelib.run' in sys.modules
+cpuCount = int(sys.argv[-1]) if '-t' in sys.argv else mp.cpu_count()
+eps = 0.000001
+dotEps = np.deg2rad(0.1)
+quadVerts = np.float32([[-1,-1],[-1,1],[1,1],[1,-1]])
+cubeVerts = np.float32([[-1,-1,-1],[-1,1,-1],[1,1,-1],[1,-1,-1],[-1,-1,1],[-1,1,1],[1,1,1],[1,-1,1]])
+sixCubeFaces = np.int32([[0,1,2,3],[4,0,3,7],[5,1,0,4],[7,3,2,6],[1,5,6,2],[5,4,7,6]])
+
+from .__version__ import __version__
+from .util import *
+from .cvt import *
+from .io import *
+

@@ -1,0 +1,17 @@
+[project]
+name = "drblib"
+version = "0.0.1"
+authors = [
+  { name="Dennis R. Bukenberger", email="dennis.bukenberger@tum.de" },
+]
+description = "A tiny collection of geometry processing routines frequently used in my projects."
+readme = "README.md"
+requires-python = ">=3.8"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+
+[project.urls]
+Homepage = "https://github.com/dbukenberger/drblib"
