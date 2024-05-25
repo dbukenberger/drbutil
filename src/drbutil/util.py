@@ -1,4 +1,189 @@
+import hashlib
+import copy
 import numpy as np
+
+
+# converting helpers
+
+def rgb2hex(rgbCol): return '#'+''.join([hex(int(c))[2:].zfill(2) for c in rgbCol])
+def hex2rgb(hexCol): return [int(cv * (1 + (len(hexCol) < 5)), 16) for cv in map(''.join, zip(*[iter(hexCol.replace('#', ''))] * (2 - (len(hexCol) < 5))))]
+def seed2hex(seed): return '#' + hashlib.md5(str(seed).encode()).hexdigest()[-6:]
+def seed2rgb(seed): return hex2rgb(seed2hex(seed))
+def rgb2rgba(rgbCol, alpha=255): return padHor(rgbCol, alpha)
+
+def pad2Dto3D(pts, c=0):
+    return np.pad(pts, [[0,0], [0,1]], mode='constant', constant_values=c)
+
+def mat2Dto3D(M):
+    return np.block([[M, np.zeros((2,1))],[np.zeros((1,2)), 1]])
+
+def quadsToTris(quadFaces):
+    return quadFaces[:,[0,1,2,2,3,0]].reshape(-1,3)
+
+def toEdgeTris(es):
+    return np.pad(es, [[0,0],[0,1]], mode='reflect')
+
+def faceToEdges(face):
+    face = np.int32(face) if type(face) == list else face
+    return face[np.roll(np.repeat(range(len(face)),2), -1)].reshape(-1,2)
+
+def facesToEdges(faces, filterUnique = True):
+    es = np.vstack([faceToEdges(face) for face in faces])
+    return filterForUniqueEdges(es) if filterUnique else es
+
+def facesToTris(faces):
+    if type(faces) == list:
+        fLens = list(map(len, faces))
+        maxLen = max(fLens)
+        mask = np.arange(maxLen) < np.array(fLens)[:,None]
+        fcs = np.zeros((len(faces), maxLen), np.int32) - 1
+        fcs[mask] = np.concatenate(faces)
+        faces = fcs
+
+    tris = np.hstack([np.repeat(faces[:,0].reshape(-1,1), faces.shape[1] - 2, axis=0), np.repeat(faces[:,1:],2, axis=1)[:,1:-1].reshape(-1,2)])
+    return tris[np.bitwise_and(tris[:,1]>=0 , tris[:,2]>=0)]
+
+def hexaToEdges(hexa):
+    return np.transpose([hexa[[0,1,2,3,4,5,6,7,0,1,2,3]], hexa[[1,2,3,0,5,6,7,4,4,5,6,7]]])
+
+def hexasToEdges(hexas):
+    es = np.vstack([hexaToEdges(hexa) for hexa in hexas])
+    es.sort(axis=1)
+    return unique2d(es)
+
+def tetToEdges(tet):
+    return np.transpose([tet[[0,1,2,1,2,3]], tet[[1,2,3,3,0,0]]])
+
+def tetsToEdges(tets):
+    es = np.vstack([tetToEdges(tet) for tet in tets])
+    es.sort(axis=1)
+    return unique2d(es)
+
+tdxs = np.ravel(np.int32([[2,1,0], [3,0,1], [3,1,2], [3,2,0]]))
+def tetraToFaces(tetra):
+    return tetra[tdxs].reshape(-1,3)
+    #return np.vstack([np.roll(tetra, i)[:-1] for i in range(4)])
+
+def tetrasToFaces(tetras):
+    tsdxs = np.tile(tdxs, len(tetras)) + np.repeat(np.arange(len(tetras)), 12) * 4
+    return np.ravel(tetras)[tsdxs].reshape(-1,3)
+    #return np.hstack([np.roll(tetras, i, axis=1)[:,:-1] for i in range(4)]).reshape(-1,3)
+
+def hexaToTetras(hexa):
+    return np.vstack([hexa[idxs] for idxs in [[0,1,3,5],[1,2,3,5],[0,3,4,5],[2,3,5,6],[3,4,5,7],[3,5,6,7]]])
+
+def hexaToFaces(hexa):
+    return hexa[sixCubeFaces]
+
+def hexasToFaces(hexas):
+    return np.vstack(hexas[...,sixCubeFaces])
+
+def edgesToPath(edgesIn):
+    edges = copy.deepcopy(edgesIn) if type(edgesIn) == list else edgesIn.tolist()
+    nLim = np.arange(len(edges) - 1).sum()
+    nTries = 0
+    face = edges.pop(0)
+    while len(edges):
+        edge = edges.pop(0)
+        if face[0] == edge[0]:
+            face.insert(0, edge[1])
+        elif face[-1] == edge[0]:
+            face.append(edge[1])
+        elif face[0] == edge[1]:
+            face.insert(0, edge[0])
+        elif face[-1] == edge[1]:
+            face.append(edge[0])
+        else:
+            edges.append(edge)
+            nTries += 1
+        if nTries > nLim:
+            return
+    return face if face[0] != face[-1] else face[:-1]
+
+def edgesToPaths(edgesIn):
+    edges = copy.deepcopy(edgesIn) if type(edgesIn) == list else edgesIn.tolist()
+    face = edges.pop(0)
+    faces = []
+    iters = 0
+    while len(edges):
+        edge = edges.pop(0)
+        if face[0] == edge[0]:
+            face.insert(0, edge[1])
+            iters = 0
+        elif face[-1] == edge[0]:
+            face.append(edge[1])
+            iters = 0
+        elif face[0] == edge[1]:
+            face.insert(0, edge[0])
+            iters = 0
+        elif face[-1] == edge[1]:
+            face.append(edge[0])
+            iters = 0
+        else:
+            edges.append(edge)
+            iters += 1
+        if len(edges) and iters >= len(edges):
+            iters = 0
+            faces.append(copy.deepcopy(face if face[0] != face[-1] else face[:-1]))
+            face = edges.pop(0)
+    faces.append(face if face[0] != face[-1] else face[:-1])
+    return faces
+
+def quaternionToMatrix(q):
+    w, x, y, z = q
+    return np.float32([[1 - 2*y*y - 2*z*z, 2*x*y - 2*z*w, 2*x*z + 2*y*w],
+                       [2*x*y + 2*z*w, 1 - 2*x*x - 2*z*z, 2*y*z - 2*x*w],
+                       [2*x*z - 2*y*w, 2*y*z + 2*x*w, 1 - 2*x*x - 2*y*y]])
+
+def matrixToQuaternion(m):
+    # Paper: New Method for Extracting the Quaternion from a Rotation Matrix
+    [d11,d12,d13],[d21,d22,d23],[d31,d32,d33] = m
+    """
+    K2 = np.float32([[d11-d22, d21+d12, d31, -d32],
+                     [d21+d12, d22-d11, d32, d31],
+                     [d31, d32, -d11-d22, d12-d21],
+                     [-d32, d31, d12-d21, d11+d22]]) / 2
+    eVals, eVecs = np.linalg.eig(K2)
+    """
+
+    K3 = np.float32([[d11-d22-d33, d21+d12, d31+d13, d23-d32],
+                     [d21+d12, d22-d11-d33, d32+d23, d31-d13],
+                     [d31+d13, d32+d23, d33-d11-d22, d12-d21],
+                     [d23-d32, d31-d13, d12-d21, d11+d22+d33]]) / 3
+    eVals, eVecs = np.linalg.eig(K3)
+    #return eVecs[np.argmax(np.abs(eVals))]
+
+    # http://www.euclideanspace.com/maths/geometry/rotations/conversions/matrixToQuaternion/ code by angel
+
+    [m00,m01,m02],[m10,m11,m12],[m20,m21,m22] = m    
+    trace = m00 + m11 + m22
+    if trace > 0:
+        s = 0.5 / np.sqrt(trace + 1.0)
+        qw = 0.25 / s
+        qx = (m21 - m12) * s
+        qy = (m02 - m20) * s
+        qz = (m10 - m01) * s
+    else:
+        if m00 > m11 and m00 > m22:
+            s = 2.0 * np.sqrt(1.0 + m00 - m11 - m22)
+            qw = (m21 - m12) / s
+            qx = 0.25 * s
+            qy = (m01 + m10) / s
+            qz = (m02 + m20) / s
+        elif m11 > m22:
+            s = 2.0 * np.sqrt(1.0 + m11 - m00 - m22)
+            qw = (m02 - m20) / s
+            qx = (m01 + m10) / s
+            qy = 0.25 * s
+            qz = (m12 + m21) / s
+        else:
+            s = 2.0 * np.sqrt(1.0 + m22 - m00 - m11)
+            qw = (m10 - m01) / s
+            qx = (m02 + m20) / s
+            qy = (m12 + m21) / s
+            qz = 0.25 * s
+            
+    return np.float32([qw,qx,qy,qz])
 
 
 # basic geometry and utility functions
@@ -125,11 +310,11 @@ def Mr3D(alpha=0, beta=0, gamma=0):
     Rz = np.array([[np.cos(gamma), -np.sin(gamma), 0], [np.sin(gamma), np.cos(gamma), 0], [0, 0, 1]])
     return np.dot(Rx, np.dot(Ry, Rz))
 
-def getPrincipalStress(sMat):
-    eVals, eVecs = np.linalg.eig(sMat)
-    eVals = np.abs(eVals)
-    o = np.argsort(eVals)[::-1]
-    return eVecs.T[o], eVals[o]
+def icdf(xs): # inverse cummulative distribution function
+    cs = xs.copy()
+    cs.sort()
+    pss = [np.abs(cs - x).argmin() for x in xs]
+    return np.float32(pss)/len(pss)
 
 def generateGridPoints(n, d, e=1):
     ptsGrid = np.linspace(-e, e, n, endpoint=False) + e / n
@@ -208,6 +393,21 @@ def intersectEdgesWithRay2D(ABs, C, d):
     ss[m] = ss.max()
     return C + d * ss[ss.argmin()]
 
+def pointInBB(BB, pt):
+    return BB[0,0] <= pt[0] and BB[0,1] <= pt[1] and BB[1,0] >= pt[0] and BB[1,1] >= pt[1]
+
+def pointInBB3D(BB, pt):
+    return (BB[0,0] <= pt[0]) * (BB[0,1] <= pt[1]) * (BB[0,2] <= pt[2]) * (BB[1,0] >= pt[0]) * (BB[1,1] >= pt[1]) * (BB[1,2] >= pt[2])
+
+def pointsInBB3D(BB, pts):
+    return np.bitwise_and(np.all(BB[0] <= pts, axis=1), np.all(BB[1] >= pts, axis=1))
+
+def bbIntersect3D(aBB, bBB):
+    return np.all(bBB[1] > aBB[0]) and np.all(bBB[0] < aBB[1])
+
+def bbsIntersect3D(aBB, bBBs):
+    return np.bitwise_and(np.all(bBBs[:,1] > aBB[0], axis=1), np.all(bBBs[:,0] < aBB[1], axis=1))
+
 def pointInTriangle2D(A, B, C, P):
     v0, v1, v2 = C - A, B - A, P - A
     u, v, d = v2[1] * v0[0] - v2[0] * v0[1], v1[1] * v2[0] - v1[0] * v2[1], v1[1] * v0[0] - v1[0] * v0[1]
@@ -260,6 +460,130 @@ def trianglesDoIntersect2D(t1, t2=None):
     else:
         return True
     return False
+
+def intersectTrianglesWithEdge(ABCs, PQ, ns = None):
+    ns = computeTriangleNormals(ABCs) if ns is None else ns
+    sP = simpleSign(inner1d(PQ[0] - ABCs[:,0], ns))
+    sQ = simpleSign(inner1d(PQ[1] - ABCs[:,0], ns))
+
+    O = PQ[0]
+    D = PQ[1]-PQ[0]
+    Dlen = norm(D)
+    D /= Dlen
+    ts = []
+    for ABC in ABCs[sP != sQ]:
+        # moeller trumbore
+        A,B,C = ABC
+        e1 = B-A
+        e2 = C-A
+        h = cross(D, e2)
+        a = np.dot(e1, h)
+        if a > -eps and a < eps:
+            continue
+        f = 1/a
+        s = O - A
+        u = f * np.dot(s, h)
+        if u < 0 or u > 1:
+            continue
+        q = cross(s, e1)
+        v = f * np.dot(D, q)
+        if v < 0 or (u+v) > 1:
+            continue
+        t = f * np.dot(e2, q)
+        if t > eps:
+            if t < Dlen:
+                return True
+    return False     
+    
+def intersectTrianglesWithRay(ABCs, O, D):
+    tMin = None
+    ts = []
+    for ABC in ABCs:
+
+        # moeller trumbore
+        A,B,C = ABC
+        e1 = B-A
+        e2 = C-A
+        h = cross(D, e2)
+        a = np.dot(e1, h)
+        if a > -eps and a < eps:
+            continue
+        f = 1/a
+        s = O - A
+        u = f * np.dot(s, h)
+        if u < 0 or u > 1:
+            continue
+        q = cross(s, e1)
+        v = f * np.dot(D, q)
+        if v < 0 or (u+v) > 1:
+            continue
+        t = f * np.dot(e2, q)
+        if t > eps:
+            tMin = t if tMin is None else min(t, tMin)
+            ts.append(t)
+    return ts
+
+# does not cover total inclusion
+def polyhedraDoIntersect(aVerts, bVerts, aTris, bTris, aEdges, bEdges, aTrisNormals = None, bTrisNormals = None):
+    #aEdges = facesToEdges(aFaces)
+    #bTris = facesToTris(bFaces)
+    for aEdge in aEdges:
+        if intersectTrianglesWithEdge(bVerts[bTris], aVerts[aEdge], bTrisNormals):
+            return True
+    #bEdges = facesToEdges(bFaces)
+    #aTris = facesToTris(aFaces)
+    for bEdge in bEdges:
+        if intersectTrianglesWithEdge(aVerts[aTris], bVerts[bEdge], aTrisNormals):
+            return True
+    return False
+
+# https://github.com/erich666/jgt-code/blob/master/Volume_07/Number_2/Ganovelli2002/tet_a_tet.h
+def tetrahedraDoIntersect(ptsA, ptsB, nsA, nsB):
+    masks = np.zeros((4,4), np.bool8)
+    coord = np.zeros((4,4), np.float32)
+
+    def faceA(i):
+        coord[i] = np.dot(ptsB - ptsA[i%3], nsA[i])
+        masks[i] = coord[i] > 0
+        return np.all(masks[i])
+
+    def faceB(i):
+        return np.all(np.dot(ptsA - ptsB[i%3], nsB[i]) > 0)
+
+    def edge(f, g):
+        if not np.all(np.bitwise_or(masks[f], masks[g])):
+            return False
+
+        for e in [[0,1],[0,2],[0,3],[1,2],[1,3],[2,3]]:
+            if (masks[f,e[0]] and not masks[f,e[1]]) and (not masks[g,e[0]] and masks[g,e[1]]):
+                if (coord[f,e[1]] * coord[g,e[0]] - coord[f,e[0]] * coord[g,e[1]]) > 0:
+                    return False
+            if (masks[f,e[1]] and not masks[f,e[0]]) and (not masks[g,e[1]] and masks[g,e[0]]):
+                if (coord[f,e[1]] * coord[g,e[0]] - coord[f,e[0]] * coord[g,e[1]]) < 0:
+                    return False
+
+        return True
+
+    def pointInside():
+        return not np.all(np.any(masks, axis=0))
+
+    fs = []
+    for f in range(4):
+        if faceA(f):
+            return False
+        for g in fs:
+            if edge(f,g):
+                return False
+        fs.append(f)
+
+    if pointInside():
+        return True
+
+    for f in range(4):
+        if faceB(f):
+            return False
+        
+    return True
 
 def pyrasDoIntersect(ptsA, ptsB, nsA, nsB):
     masks = np.zeros((5,5), np.bool8)
@@ -371,7 +695,7 @@ def aaProject3Dto2D(verts):
     pVerts = verts - pDir * np.dot(verts, pDir).reshape(-1,1)
     return pVerts[:, np.int32([pDim + 1, pDim + 2]) % 3]   
 
-def getConvexPolygonVertexOrder(pts, refPt = None):
+def computeConvexPolygonVertexOrder(pts, refPt = None):
     cPt = pts.mean(axis=0)
     if refPt is not None:
         n = normVec(refPt - cPt)
@@ -464,26 +788,26 @@ def computePolygonCentroid2D(pts, withArea=False):
     centroid = np.sum((pts + rPts) * w.reshape(-1,1), axis=0) / (6 * area)
     return (centroid, np.abs(area)) if withArea else centroid
 
-def getTriangleNormal(pts, normed = True):
+def computeTriangleNormal(pts, normed = True):
     AB, AC = pts[1:] - pts[0] if pts.ndim < 3 else (pts[:,1:] - pts[:,0].reshape(-1,1,3)).T
     return cross(AB, AC, normed)
 
-def getTriangleNormals(pts, normed = True):
+def computeTriangleNormals(pts, normed = True):
     ABAC = pts[:,1:] - pts[:,0].reshape(-1,1,3)
     return cross(ABAC[:,0], ABAC[:,1], normed)
 
-def getTriangleArea(pts):
+def computeTriangleArea(pts):
     if pts.shape[1] == 2:
         return simpleDet3x3(pad2Dto3D(pts, 1).T)/2
     else:
-        return norm(getTriangleNormal(pts, False))/2
+        return norm(computeTriangleNormal(pts, False))/2
 
-def getTriangleAreas(pts, signed = True):
+def computeTriangleAreas(pts, signed = True):
     if pts.shape[-1] == 2:
         areas = simpleDets3x3(np.transpose(np.pad(pts, [[0,0],[0,0],[0,1]], mode='constant',constant_values = 1), axes=[0,2,1]))/2
         return areas if signed else np.abs(areas)
     else:
-        return norm(getTriangleNormals(pts, False))/2
+        return norm(computeTriangleNormals(pts, False))/2
 
 def computeTetraVolume(pts):
     a, b, c = pts[1:] - pts[0]
@@ -520,15 +844,6 @@ def computePolyhedronCentroid(vertices, faces, returnVolume=False):
     tetVolumesSum = tetVolumes.sum()
     polyCentroid = np.dot(tetVolumes/tetVolumesSum, tetCentroids) if tetVolumesSum > eps else tetCentroids.mean(axis=0)
     return (polyCentroid, tetVolumesSum) if returnVolume else polyCentroid
-
-def getConvexPolygonVertexOrder(pts, refPt=None):
-    cPt = pts.mean(axis=0)
-    if refPt is not None:
-        n = normVec(refPt - cPt)
-        pts = projectPoints(pts, cPt, n, True)
-        cPt = pts.mean(axis=0)
-    dirs = normVec(pts - cPt)
-    return np.argsort((np.arctan2(dirs[:,0], dirs[:,1]) + 2 * np.pi) % (2 * np.pi))
 
 def projectPoints(pts, o, n, return2d=False):
     vs = pts - o
@@ -577,7 +892,7 @@ def limitedDissolve2D(verts):
             vIdxs.append(vIdx)
     return limitedDissolve2D(verts[vIdxs]) if len(vIdxs) < n else verts[vIdxs]
 
-def getFaceCutIdxs(faceMasks):
+def computeFaceCutIdxs(faceMasks):
     faceMasksCat = np.concatenate(faceMasks)
     faceLensCum = np.cumsum([0]+list(map(len, faceMasks)))
     firstLastIdxs = np.transpose([faceLensCum[:-1], faceLensCum[1:]-1])
@@ -599,6 +914,26 @@ def interpolateBezierTriangle(points, normals):
     bezierCenter = bs[3:].sum(axis=0)/4 - bs[:3].sum(axis=0)/6
     return bezierCenter, normVec(bezierCenter - points.mean(axis=0))
 
+def quaternionSlerp(qa, qb, t):
+    # http://www.euclideanspace.com/maths/algebra/realNormedAlgebra/quaternions/slerp/
+    ratios = [1, 0]
+    cosHalfTheta = np.dot(qa, qb)
+    if abs(cosHalfTheta) < 1:
+        halfTheta = np.arccos(cosHalfTheta)
+        sinHalfTheta = np.sqrt(1 - cosHalfTheta**2)
+        if abs(sinHalfTheta) < eps:
+            ratios = [0.5, 0.5]
+        else:
+            ratios = np.sin(np.float32([1-t, t]) * halfTheta) / sinHalfTheta
+    return np.dot(ratios, [qa, qb])
+
+def quaternionAverage(quats, weights = None):
+    # https://stackoverflow.com/questions/12374087/average-of-multiple-quaternions    
+    weights = np.ones(len(quats),np.float32) if weights is None else weights
+    Q = quats * (weights/weights.sum()).reshape(-1,1)
+    eigVals, eigVecs = np.linalg.eig(np.dot(Q.T, Q))
+    return eigVecs[:,np.argmax(eigVals)]
+
 def rotateAsToB(As, Bup, Aup = np.float32([0,0,1])):
     x = cross(Aup,Bup,True)
     theta = np.arccos(np.dot(Aup,Bup)/(np.linalg.norm(Aup)*np.linalg.norm(Bup)))
@@ -606,40 +941,109 @@ def rotateAsToB(As, Bup, Aup = np.float32([0,0,1])):
     R = np.eye(3) + np.sin(theta) * Mx + (1-np.cos(theta))*np.dot(Mx,Mx)
     return np.dot(R,As.T).T
 
-def getRotationMatrixXYZ(alpha = 0, beta = 0, gamma = 0):
-    Rx = np.array([[1, 0, 0], [0, np.cos(alpha), -np.sin(alpha)], [0, np.sin(alpha), np.cos(alpha)]])
-    Ry = np.array([[np.cos(beta), 0, -np.sin(beta)], [0, 1, 0], [np.sin(beta), 0, np.cos(beta)]])
-    Rz = np.array([[np.cos(gamma), -np.sin(gamma), 0], [np.sin(gamma), np.cos(gamma), 0], [0, 0, 1]])
-    M = np.dot(Rx, np.dot(Ry, Rz))
-    return M
+def orthogonalizeOrientation(S):
+    U,s,Vt = np.linalg.svd(S)
+    #R = U @ Vt
+    #R[simpleDets3x3(R) < 0,-1] *= -1
+    #return R
+    Vt[:,-1] *= simpleDets(U @ Vt)[:,None]
+    return U @ Vt
 
-def getMat(ab,cd):
-    dp = np.dot(ab,cd.T)
-    return np.argsort(np.abs(dp)) * simpleSign(dp)
+def computeRotationAngle(M):
+    return min(np.float32([np.arctan2(M[0,0], M[0,1]),np.arctan2(M[0,1],M[0,0])]) % (np.pi/2))
 
-def mixFaceDirections(vds, vns, fn, v = False):
-    gs = np.zeros(6, np.float32)
-    for vIdx in range(3):
-        #vrs = normVec(projectPoints(vds[vIdx], np.float32([0,0,0]), fn))
-        vrs = rotateAsToB(vds[vIdx], fn, vns[vIdx])
-        vrs = rotateAsToB(vrs, np.float32([0,0,1]), fn)
+def computeRotationAngles(Ms):
+    a0 = np.arctan2(Ms[:,0,0], Ms[:,0,1]) % (np.pi/2)
+    a1 = np.arctan2(Ms[:,0,1], Ms[:,0,0]) % (np.pi/2)
+    return np.minimum(a0, a1)
 
-        g = np.arctan2(vrs[0,1], vrs[0,0]) % (np.pi/2)
-        gs[vIdx] = g
-        gs[vIdx+3] = g - np.pi/2
+def computeMinEulerAngle(A, B):
+    return alignBtoA(A, B, True)    
 
-    M = np.float32([[1,1,1,0,0,0],
-                    [1,1,0,0,0,1],
-                    [1,0,1,0,1,0],
-                    [1,0,0,0,1,1],
-                    [0,1,1,1,0,0],
-                    [0,1,0,1,0,1],
-                    [0,0,1,1,1,0],
-                    [0,0,0,1,1,1]])
+def computeMinEulerAngles(A, Bs):
+    return np.float32([alignBtoA(A, B, True) for B in Bs])
 
-    r = np.dot(M/3, gs)
-    d = gs - r.reshape(-1,1)
-    ds = np.sum((d * M)**2, axis=1)
-    gamma = r[np.argmin(ds)]
+def alignBtoA(A, B, angleOnly = False):
+    os = [[0,1,2],[1,2,0],[2,0,1],[0,2,1],[2,1,0],[1,0,2]]
+    ss = [[1,1,1],[1,1,-1],[1,-1,1],[1,-1,-1],[-1,1,1],[-1,1,-1],[-1,-1,1],[-1,-1,-1]]
+    Bs = np.tile(B[os],[8,1,1]) * np.repeat(ss, 6, axis=0).reshape(-1,3,1)
+    a = np.arccos(np.clip((innerAxBs(A,Bs).sum(axis=1)-1)/2,-1,1))
+    return a.min() if angleOnly else Bs[np.argmin(a)]                
+
+def alignBstoA(A, Bs):
+    return np.float32([alignBtoA(A, B) for B in Bs])
+
+def computeMinTransformation(M):
+    if len(M) == 2:
+        return Mr2D(np.arctan2(M[0,1], M[0,0]) % (np.pi/2))
+    argmax3 = lambda v: 0 if v[0] > max(v[1],v[2]) else (1 if v[1] > v[2] else 2)
+    aM = np.abs(M)
+    o0 = [0,1,2]
+    o = [o0.pop(argmax3(aM[:,0]))] + (o0 if aM[o0[0],1] > aM[o0[1],1] else o0[::-1])
+    N = np.zeros((3,3))
+    N[[0,1,2],o] = np.sign(M[o,[0,1,2]])
+    return np.dot(N, M)
+
+def computeMinTransformations(Ms):
+    if len(Ms[0]) == 2:
+        return np.float32([computeMinTransformation(M) for M in Ms])
+    n = len(Ms)
+    nRange = np.arange(n)
+    aMs = np.abs(Ms)
+    fst = np.argmax(aMs[:,:,0], axis=1)
+    rst = (np.tile([[1,2]],[n,1]) + fst.reshape(-1,1)) % 3
+    idxs = np.argmax(aMs[np.transpose([nRange]*2), rst, np.ones((n,2),np.int32)], axis=1)
+
+    rs = np.transpose([fst, rst[nRange,idxs], rst[nRange,idxs-1]])
+
+    z = np.zeros_like(Ms)
+    idxsA = np.repeat(nRange, 3).reshape(-1,3)
+    idxsB = (np.arange(n*3)%3).reshape(-1,3)
+    z[idxsA, idxsB, rs] = np.sign(Ms[idxsA, rs, idxsB])
+
+    return inner3x3M(z, Ms)
+
+def computeAvgTransformation(Ms):
+    if Ms.shape[1] == 2:
+        U,D,V = np.linalg.svd(Ms.sum(axis=0))
+        M = np.dot(U, V)
+        return computeMinTransformation(M)
+    M = np.float32([computeAvgDirection(Ms[:,i]) for i in range(3)])
+    M[1:] -= M[0] * inner1d(M[1:], M[0]).reshape(-1,1)
+    U,D,V = np.linalg.svd(M)
+    return np.dot(U,V)
+
+def orthogonalizeMatrix(M):
+    q,r = np.linalg.qr(M) # may produce sign flips
+    return np.copysign(q, M)
+
+def computeWeightedTransformation(Ms, ws = None):
+    ws = np.ones(len(Ms), np.float32) if ws is None else ws
+    rMs = alignBstoA(Ms[ws.argmax()], Ms) * (ws/ws.sum()).reshape(-1,1,1) 
+    return orthogonalizeMatrix(rMs.sum(axis=0))
     
-    return rotateAsToB(Mr3D(0,0,gamma)[:,:-1].T, fn, np.float32([0,0,1]))
+def computeAvgDirection(vs, maxIter = 100, tol = 1e-6):
+    avgDir = normVec(np.random.rand(3))
+
+    for i in range(maxIter):
+        newAvgDir = normVec(np.sum(vs * np.dot(vs, avgDir).reshape(-1,1), axis=0))
+        if norm(avgDir - newAvgDir) < tol:
+            break
+        avgDir = newAvgDir
+
+    return avgDir
+
+def vecsToOrthoMatrix(vs): # experimental
+    if len(vs) > 3:
+        vBuckets = [[],[],[]]
+        for v in vs:
+            for b in vBuckets:
+                if not b:
+                    b.append(v)
+                    break
+                if np.arccos(np.clip(np.abs(np.dot(b[0], v)),0,1)) < np.pi/8:
+                    b.append(v)
+                    break
+        vs = np.float32([computeAvgDirection(b) for b in vBuckets])
+    return orthogonalizeMatrix(normVec(vs))
+

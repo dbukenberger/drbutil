@@ -3,9 +3,30 @@ import sys
 import multiprocessing as mp
 import logging
 import numpy as np
+import builtins
 
-from timeit import default_timer as timer
+from timeit import default_timer as time
 
+np.random.seed(23)
+
+# useful global constants
+IN_IDLE = 'idlelib.run' in sys.modules
+cpuCount = int(sys.argv[-1]) if '-t' in sys.argv else mp.cpu_count()
+builtins.eps = 0.000001
+builtins.dotEps = np.deg2rad(0.1)
+builtins.quadVerts = np.float32([[-1,-1],[-1,1],[1,1],[1,-1]])
+builtins.cubeVerts = np.float32([[-1,-1,-1],[-1,1,-1],[1,1,-1],[1,-1,-1],[-1,-1,1],[-1,1,1],[1,1,1],[1,-1,1]])
+builtins.sixCubeFaces = np.int32([[0,1,2,3],[4,0,3,7],[5,1,0,4],[7,3,2,6],[1,5,6,2],[5,4,7,6]])
+
+# log and result directories
+logDir = 'logs/'
+resDir = 'results/'
+for pDir in [logDir, resDir]:
+    if not os.path.exists(pDir):
+        try:
+            os.mkdir(pDir)
+        except PermissionError:
+            pass
 
 # for visualizing 2D results
 try:
@@ -69,19 +90,8 @@ class Logger:
         fmtArgs = style % tplArgs if style is not None else str(tplArgs)
         self.log.info(msg + ':\t' + fmtArgs)
 
-np.random.seed(23)
-
-# useful global constants
-IN_IDLE = 'idlelib.run' in sys.modules
-cpuCount = int(sys.argv[-1]) if '-t' in sys.argv else mp.cpu_count()
-eps = 0.000001
-dotEps = np.deg2rad(0.1)
-quadVerts = np.float32([[-1,-1],[-1,1],[1,1],[1,-1]])
-cubeVerts = np.float32([[-1,-1,-1],[-1,1,-1],[1,1,-1],[1,-1,-1],[-1,-1,1],[-1,1,1],[1,1,1],[1,-1,1]])
-sixCubeFaces = np.int32([[0,1,2,3],[4,0,3,7],[5,1,0,4],[7,3,2,6],[1,5,6,2],[5,4,7,6]])
 
 from .__version__ import __version__
+#from .cvt import *
 from .util import *
-from .cvt import *
 from .io import *
-

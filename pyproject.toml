@@ -1,5 +1,5 @@
 [project]
-name = "drblib"
+name = "drbutil"
 version = "0.0.1"
 authors = [
   { name="Dennis R. Bukenberger", email="dennis.bukenberger@tum.de" },
@@ -14,4 +14,4 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/dbukenberger/drblib"
+Homepage = "https://github.com/dbukenberger/drbutil"

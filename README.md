@@ -1,4 +1,4 @@
-# drblib
+# drbutil
 
 A tiny collection of geometry processing routines frequently used in my prototyping code.
 
@@ -16,4 +16,4 @@ The only **actually required** library is [NumPy](https://github.com/numpy/numpy
 ## Install & Use
 Clone the repo and in the main directory, run the `buildAndInstall.bat/.sh` script.
 
-Then you can import everything in your project with `import drblib` or `from drblib import *`, respectively.
+Then you can import everything in your project with `import drbutil` or `from drbutil import *`, respectively.
