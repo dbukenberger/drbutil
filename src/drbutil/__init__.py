@@ -31,6 +31,7 @@ for pDir in [logDir, resDir]:
 # for visualizing 2D results
 try:
     import matplotlib.pyplot as plt
+    from matplotlib.widgets import Slider, Button, RadioButtons
 except ImportError:
     mplFound = False
 else:
@@ -47,8 +48,8 @@ else:
 # for visualizing 3D results
 try:
     from mayavi import mlab
-    from traits.api import HasTraits, Range, Instance, on_trait_change
-    from traitsui.api import View, Item, Group
+    from traits.api import HasTraits, Range, Instance, on_trait_change, Button, Enum
+    from traitsui.api import View, Item, Group, HSplit
     from mayavi.core.api import PipelineBase
     from mayavi.core.ui.api import MayaviScene, SceneEditor, MlabSceneModel
 except ImportError:

@@ -413,6 +413,70 @@ def loadStressFile(fileName):
     pStress = np.zeros_like(sMats)
     pStressE = np.zeros((len(stress), nDim), np.float32)
     for i, sMat in enumerate(sMats):
-        pStress[i], pStressE[i] = getPrincipalStress(sMat)
+        pStress[i], pStressE[i] = computePrincipalStress(sMat)
 
     return verts, cells, forceIdxs, forceVecs, fixedIdxs, vmStress, pStress, pStressE, sMats
+
+def loadVtkFile(fileName):
+    verts = []
+    hexas = []
+    with open(fileName, 'r') as fh:
+        mode = None
+        for line in fh.readlines():
+            lTag = line.split(' ')[0]
+
+            if lTag == 'POINTS':
+                mode = 'pts'
+                continue
+
+            if lTag == 'CELLS':
+                mode = 'cls'
+                continue
+
+            if lTag == 'CELL_TYPES':
+                mode = None
+                continue
+
+            if mode is None:
+                continue
+            
+            if mode == 'pts':
+                verts.append(line.strip().split(' '))
+
+            if mode == 'cls':
+                hexas.append(line[1:].strip().split(' '))
+                
+    return np.float32(verts), np.int32(hexas)
+
+def loadHybridFile(fileName, withHexFlags = False):
+    hybFile = open(fileName, 'r')
+    line = hybFile.readline().strip()
+    numVertices, numFaces, numPolyhedra = np.int32(line.split(' '))
+
+    vertices = np.empty((numVertices, 3), np.float32)
+    for i in range(numVertices):
+        line = hybFile.readline().strip()
+        vertices[i] = [float(v) for v in line.split(' ')]
+        
+    faces = []
+    for i in range(numFaces):
+        line = hybFile.readline().strip()
+        face = np.int32(line.split(' '))
+        faces.append(face[1:])
+        
+    polyhedra = []
+    hexFlags = []
+    for i in range(numPolyhedra):
+        line = hybFile.readline().strip()
+        if len(line) == 1 and withHexFlags:
+                hexFlags.append('1' in line)
+        elif len(line):
+            polyhedron = np.int32(line.split(' '))
+            polyhedra.append(polyhedron[1:])
+            line = hybFile.readline() # skip orientation line
+        else:
+            break
+        
+    hybFile.close()
+
+    return (vertices, faces, polyhedra, np.bool_(hexFlags)) if withHexFlags else (vertices, faces, polyhedra)

@@ -442,6 +442,21 @@ def pointInTriangles3D(ABCs, P, uvws = None, ns = None, assumeInPlane = False):
             return False
     return True
 
+def arePointsCoplanar(pts):
+    if len(pts) <= 3:
+        return True
+    u,v = normVec(pts[[1,2]] - pts[0])
+    return np.all(np.abs(np.dot(normVec(pts[2:] - pts[0]), cross(u, v, True))) < dotEps)
+
+def arePointsColinear(pts):
+    if len(pts) == 2:
+        return True
+    if len(pts) == 3:
+        u,v = normVec(pts[[1,2]] - pts[0])
+        return np.abs(np.dot(u,v)) > 1-eps
+    ds = normVec(pts[1:] - pts[0])
+    return np.abs(np.dot(ds[1:], ds[0])).min() > 1-dotEps
+
 def trianglesDoIntersect2D(t1, t2=None):
     if t2 is None:
         t1, t2 = t1
@@ -844,6 +859,12 @@ def computePolyhedronCentroid(vertices, faces, returnVolume=False):
     tetVolumesSum = tetVolumes.sum()
     polyCentroid = np.dot(tetVolumes/tetVolumesSum, tetCentroids) if tetVolumesSum > eps else tetCentroids.mean(axis=0)
     return (polyCentroid, tetVolumesSum) if returnVolume else polyCentroid
+
+def computePrincipalStress(sMat):
+    eVals, eVecs = np.linalg.eig(sMat)
+    eVals = np.abs(eVals)
+    o = np.argsort(eVals)[::-1]
+    return eVecs.T[o], eVals[o]
 
 def projectPoints(pts, o, n, return2d=False):
     vs = pts - o
