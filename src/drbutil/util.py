@@ -129,6 +129,9 @@ def edgesToPaths(edgesIn):
     faces.append(face if face[0] != face[-1] else face[:-1])
     return faces
 
+def pathToEdges(path):
+    return np.transpose([path, np.roll(path, -1)])
+
 def quaternionToMatrix(q):
     w, x, y, z = q
     return np.float32([[1 - 2*y*y - 2*z*z, 2*x*y - 2*z*w, 2*x*z + 2*y*w],
@@ -328,13 +331,15 @@ def generateGridPoints(n, d, e=1):
         warnings.warn('%d dimensions not supported'%d)
         return
 
-def generatePointsOnCircle(n, in3D = False):
+def generatePointsOnCircle(n, in3D = False, withCenter = False):
     if n<=0:
         return None
     offset = np.pi/n
     alpha = np.linspace(offset, np.pi*2-offset, n)
     pts = np.transpose([np.cos(alpha), np.sin(alpha)])
-    return np.pad(pts, [[0,0],[0,1]], 'constant', constant_values = 0) if in3D else pts
+    if withCenter:
+        pts = np.vstack([pts, [0,0]])
+    return pad2Dto3D(pts) if in3D else pts
 
 def distPointToEdge(A, B, P):
     AtoB = B - A
