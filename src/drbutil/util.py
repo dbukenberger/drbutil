@@ -918,22 +918,6 @@ def limitedDissolve2D(verts):
             vIdxs.append(vIdx)
     return limitedDissolve2D(verts[vIdxs]) if len(vIdxs) < n else verts[vIdxs]
 
-def computeFaceCutIdxs(faceMasks):
-    faceMasksCat = np.concatenate(faceMasks)
-    faceLensCum = np.cumsum([0]+list(map(len, faceMasks)))
-    firstLastIdxs = np.transpose([faceLensCum[:-1], faceLensCum[1:]-1])
-
-    firstLasts = faceMasksCat[firstLastIdxs.ravel()].reshape(-1,2)
-    trueStartIdxs = faceLensCum[np.where(firstLasts.sum(axis=1) == 1)[0]]
-
-    firstLastIdxsFlat = firstLasts.ravel()[:-1]
-    falseStartIdxs = faceLensCum[np.where(np.reshape(firstLastIdxsFlat[1:] ^ firstLastIdxsFlat[:-1], (-1,2))[:,1])[0]+1]
-
-    inFaceIdxs = np.where(faceMasksCat[:-1] ^ faceMasksCat[1:])[0]+1
-
-    resIdxs = np.int32(sorted(set(inFaceIdxs).difference(falseStartIdxs).union(trueStartIdxs)))
-    return resIdxs.reshape(-1,2) - np.reshape(faceLensCum[:-1], (-1,1))
-
 def interpolateBezierTriangle(points, normals):
     b = lambda i, j: (2*points[i] + points[j] - np.dot(points[j]-points[i], normals[i]) * normals[i])/3
     bs = np.array([points[0], points[1], points[2], b(0,1), b(1,0), b(1,2), b(2,1), b(2,0), b(0,2)])
