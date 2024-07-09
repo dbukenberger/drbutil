@@ -196,16 +196,17 @@ try:
 except ImportError:
     def inner1d(u, v): return np.einsum('ij,ij->i', u, v)
 
-def normVec(v):
+def normVec(v, withLen = False):
     if v.ndim == 1:
         n = np.sqrt(np.dot(v, v))
-        return v / n if n else v * 0
+        res = v / n if n else v * 0
+        return (res, n) if withLen else res
     else:
         n = np.sqrt(inner1d(v, v))
         m = n != 0
         v = v.copy()
         v[m] /= n[m].reshape(-1, 1)
-        return v
+        return (v, n) if withLen else v
 
 def norm(v): return np.sqrt(np.dot(v, v) if v.ndim == 1 else inner1d(v, v))
 
@@ -373,12 +374,22 @@ def distPointsToEdge(A, B, Ps):
     return dists    
 
 def edgesIntersect2D(A, B, C, D):
-    d = (D[1] - C[1]) * (B[0] - A[0]) - (D[0] - C[0]) * (B[1] - A[1])
-    u = (D[0] - C[0]) * (A[1] - C[1]) - (D[1] - C[1]) * (A[0] - C[0])
-    v = (B[0] - A[0]) * (A[1] - C[1]) - (B[1] - A[1]) * (A[0] - C[0])
-    if d < 0:
-        u, v, d = -u, -v, -d
-    return (0 <= u <= d) and (0 <= v <= d)
+    if A.ndim == 1:
+        d = (D[1] - C[1]) * (B[0] - A[0]) - (D[0] - C[0]) * (B[1] - A[1])
+        u = (D[0] - C[0]) * (A[1] - C[1]) - (D[1] - C[1]) * (A[0] - C[0])
+        v = (B[0] - A[0]) * (A[1] - C[1]) - (B[1] - A[1]) * (A[0] - C[0])
+        if d < 0:
+            u, v, d = -u, -v, -d
+        return (0 <= u <= d) and (0 <= v <= d)
+    d = (D[1] - C[1]) * (B[:,0] - A[:,0]) - (D[0] - C[0]) * (B[:,1] - A[:,1])
+    u = (D[0] - C[0]) * (A[:,1] - C[1]) - (D[1] - C[1]) * (A[:,0] - C[0])
+    v = (B[:,0] - A[:,0]) * (A[:,1] - C[1]) - (B[:,1] - A[:,1]) * (A[:,0] - C[0])
+    dMsk = d < 0
+    if dMsk.any():
+        u[dMsk] *= -1
+        v[dMsk] *= -1
+        d[dMsk] *= -1
+    return (0 <= u) * (u <= d) * (0 <= v) * (v <= d)
 
 def intersectEdgesWithRay2D(ABs, C, d):
     eDirs = normVec(ABs[:,1] - ABs[:,0])
@@ -1042,6 +1053,26 @@ def computeAvgDirection(vs, maxIter = 100, tol = 1e-6):
         avgDir = newAvgDir
 
     return avgDir
+
+def computeJacobian(pts, scaled = False):
+    return computeJacobians(pts.reshape(1, pts.shape[0], pts.shape[1]), scaled)[0]
+
+def computeJacobians(ptss, scaled = False):
+    if ptss.shape[2] == 2:
+        Js = np.float32([ptss[:,[3,1]] - ptss[:,0,None],
+                         ptss[:,[0,2]] - ptss[:,1,None],
+                         ptss[:,[1,3]] - ptss[:,2,None],
+                         ptss[:,[2,0]] - ptss[:,3,None]])
+        return simpleDets2x2(np.vstack(np.transpose(normVec(Js) if scaled else Js, axes=[1,0,2,3]))).reshape(-1,4)
+    Js = np.float32([ptss[:,[2,1,3]] - ptss[:,0,None],
+                     ptss[:,[4,5,0]] - ptss[:,1,None],
+                     ptss[:,[6,4,0]] - ptss[:,2,None],
+                     ptss[:,[0,5,6]] - ptss[:,3,None],
+                     ptss[:,[7,1,2]] - ptss[:,4,None],
+                     ptss[:,[1,7,3]] - ptss[:,5,None],
+                     ptss[:,[3,7,2]] - ptss[:,6,None],
+                     ptss[:,[5,4,6]] - ptss[:,7,None]])
+    return simpleDets3x3(np.vstack(np.transpose(normVec(Js) if scaled else Js, axes=[1,0,2,3]))).reshape(-1,8)
 
 def vecsToOrthoMatrix(vs): # experimental
     if len(vs) > 3:
