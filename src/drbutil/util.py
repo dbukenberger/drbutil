@@ -296,6 +296,33 @@ def simpleDets3x3(Ms):
     a,b,c,d,e,f,g,h,i = Ms[:,[0,0,0,1,1,1,2,2,2],[0,1,2,0,1,2,0,1,2]].T
     return a*e*i + b*f*g + c*d*h - c*e*g - b*d*i - a*f*h
 
+def simpleSVD(A, returnS = True):
+    evals, V = np.linalg.eigh(np.dot(A.T, A))
+    V = V[:, ::-1]
+    svals = np.sqrt(np.maximum(evals[::-1], 0))
+
+    m = svals > eps
+    U = np.dot(A, V)
+    U *= m
+    U[:,m] /= svals[m]
+
+    return (U, svals, V.T) if returnS else (U, V.T)
+
+def simpleSVDs(As, returnS = True):
+    evalss, Vs = np.linalg.eigh(np.transpose(As, axes=[0,2,1]) @ As)
+    Vs = Vs[:,:,::-1]
+    svalss = np.sqrt(np.maximum(evalss[:,::-1], 0))
+
+    nDim = evalss.shape[1]
+    ms = svalss > eps
+    Us = As @ Vs
+    Us *= ms.reshape(-1, 1, nDim)
+    mms = np.repeat(ms[:,np.newaxis], nDim, axis=1)
+    Us[mms] /= np.repeat(svalss[:,np.newaxis], nDim, axis=1)[mms]
+
+    Vts = np.transpose(Vs, axes=[0,2,1])
+    return (Us, svalss, Vts) if returnS else (Us, Vts)
+
 def cross(a, b, normed=False):
     if a.ndim == 1 and b.ndim == 1:
         c = np.array([a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]])
@@ -720,7 +747,7 @@ def triangulatePoly3D(vs):
 
 def aaProject3Dto2D(verts):
     vecs = normVec(verts - verts.mean(axis=0))
-    eVals, eVecs = np.linalg.eig(np.dot(vecs.T, vecs))
+    eVals, eVecs = np.linalg.eigh(np.dot(vecs.T, vecs))
     pDim = np.abs(eVecs[:,eVals.argmin()]).argmax()
     pDir = np.eye(3)[pDim]
     pVerts = verts - pDir * np.dot(verts, pDir).reshape(-1,1)
@@ -877,7 +904,7 @@ def computePolyhedronCentroid(vertices, faces, returnVolume=False):
     return (polyCentroid, tetVolumesSum) if returnVolume else polyCentroid
 
 def computePrincipalStress(sMat):
-    eVals, eVecs = np.linalg.eig(sMat)
+    eVals, eVecs = np.linalg.eigh(sMat)
     eVals = np.abs(eVals)
     o = np.argsort(eVals)[::-1]
     return eVecs.T[o], eVals[o]
@@ -952,7 +979,7 @@ def quaternionAverage(quats, weights = None):
     # https://stackoverflow.com/questions/12374087/average-of-multiple-quaternions    
     weights = np.ones(len(quats),np.float32) if weights is None else weights
     Q = quats * (weights/weights.sum()).reshape(-1,1)
-    eigVals, eigVecs = np.linalg.eig(np.dot(Q.T, Q))
+    eigVals, eigVecs = np.linalg.eigh(np.dot(Q.T, Q))
     return eigVecs[:,np.argmax(eigVals)]
 
 def rotateAsToB(As, Bup, Aup = np.float32([0,0,1])):
@@ -962,10 +989,11 @@ def rotateAsToB(As, Bup, Aup = np.float32([0,0,1])):
     R = np.eye(3) + np.sin(theta) * Mx + (1-np.cos(theta))*np.dot(Mx,Mx)
     return np.dot(R,As.T).T
 
-def orthogonalizeOrientation(S):
-    U,s,Vt = np.linalg.svd(S)
+def orthogonalizeOrientations(Ss):
+    U,s,Vt = np.linalg.svd(Ss)
+    #U, Vt = simpleSVDs(Ss, False) # experimental
     #R = U @ Vt
-    #R[simpleDets3x3(R) < 0,-1] *= -1
+    #R[simpleDets3x3(R) < 0, -1] *= -1
     #return R
     Vt[:,-1] *= simpleDets(U @ Vt)[:,None]
     return U @ Vt
