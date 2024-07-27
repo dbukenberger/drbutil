@@ -24,8 +24,7 @@ def toEdgeTris(es):
     return np.pad(es, [[0,0],[0,1]], mode='reflect')
 
 def faceToEdges(face):
-    face = np.int32(face) if type(face) == list else face
-    return face[np.roll(np.repeat(range(len(face)),2), -1)].reshape(-1,2)
+    return np.transpose([face, np.roll(face, -1)])
 
 def facesToEdges(faces, filterUnique = True):
     es = np.vstack([faceToEdges(face) for face in faces])
@@ -341,7 +340,7 @@ def Mr3D(alpha=0, beta=0, gamma=0):
     Rz = np.array([[np.cos(gamma), -np.sin(gamma), 0], [np.sin(gamma), np.cos(gamma), 0], [0, 0, 1]])
     return np.dot(Rx, np.dot(Ry, Rz))
 
-def icdf(xs): # inverse cummulative distribution function
+def icdf(xs): # inverse cumulative distribution function
     cs = xs.copy()
     cs.sort()
     pss = [np.abs(cs - x).argmin() for x in xs]
@@ -368,6 +367,30 @@ def generatePointsOnCircle(n, in3D = False, withCenter = False):
     if withCenter:
         pts = np.vstack([pts, [0,0]])
     return pad2Dto3D(pts) if in3D else pts
+
+def generateIcoSphere(nSubdiv = 0, likeBlender = False):
+    t = (1 + np.sqrt(5)) / 2
+
+    if likeBlender:
+        # blender subdiv is different, but okay for first two levels
+        verts = normVec(np.float32([[-t,0,-1],[0,-1,-t],[-1,-t,0],[-t,0,1],[-1,t,0],[0,1,-t],[1,-t,0],[0,-1,t],[0,1,t],[1,t,0],[t,0,-1],[t,0,1]]))
+        verts = np.dot(verts, Mr3D(0, np.arctan2(verts[-1,0],verts[-1,2]), 0).T)
+        tris = np.int32([[0,1,2],[1,0,5],[0,2,3],[0,3,4],[0,4,5],[1,5,10],[2,1,6],[3,2,7],[4,3,8],[5,4,9],[1,10,6],[2,6,7],[3,7,8],[4,8,9],[5,9,10],[6,10,11],[7,6,11],[8,7,11],[9,8,11],[10,9,11]])
+    else:
+        verts = normVec(np.float32([[-1,t,0],[1,t,0],[-1,-t,0],[1,-t,0],[0,-1,t],[0,1,t],[0,-1,-t],[0,1,-t],[t,0,-1],[t,0,1],[-t,0,-1],[-t,0,1]]))
+        tris = np.int32([[0,11,5],[0,5,1],[0,1,7],[0,7,10],[0,10,11],[1,5,9],[5,11,4],[11,10,2],[10,7,6],[7,1,8],[3,9,4],[3,4,2],[3,2,6],[3,6,8],[3,8,9],[4,9,5],[2,4,11],[6,2,10],[8,6,7],[9,8,1]])
+
+    for i in range(nSubdiv):
+        edges = facesToEdges(tris)
+        eHashVertIdxs = {eHash: p for eHash, p in zip(cantorPiV(edges), len(verts)+np.arange(len(edges)))}
+        newTris = []
+        for tri in tris:
+            u0, u1, u2 = [eHashVertIdxs[eHash] for eHash in cantorPiV(faceToEdges(tri))]
+            newTris += [[tri[0],u0,u2],[tri[1],u1,u0],[tri[2],u2,u1],[u0,u1,u2]]
+        tris = np.int32(newTris)
+        verts = np.vstack([verts, normVec(verts[edges].mean(axis=1))])
+
+    return verts, tris
 
 def distPointToEdge(A, B, P):
     AtoB = B - A
@@ -457,6 +480,16 @@ def pointInTriangle2D(A, B, C, P):
     if d < 0:
         u, v, d = -u, -v, -d
     return u >= 0 and v >= 0 and (u + v) <= d
+
+def pointInTriangles2D(ABCs, P):
+    v0s, v1s, v2s = ABCs[:,2] - ABCs[:,0], ABCs[:,1] - ABCs[:,0], P - ABCs[:,0]
+    us, vs, ds = v2s[:,1] * v0s[:,0] - v2s[:,0] * v0s[:,1], v1s[:,1] * v2s[:,0] - v1s[:,0] * v2s[:,1], v1s[:,1] * v0s[:,0] - v1s[:,0] * v0s[:,1]
+    m = ds < 0
+    if m.any():
+        us[m] *= -1
+        vs[m] *= -1
+        ds[m] *= -1
+    return np.bitwise_and(np.bitwise_and(us >= 0, vs >= 0), (us + vs) <= ds).any()    
 
 def pointInTriangle3D(A, B, C, P):
     u,v,w = B-A, C-B, A-C
