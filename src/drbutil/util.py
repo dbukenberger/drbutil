@@ -887,9 +887,10 @@ def computeTriangleNormals(pts, normed = True):
     ABAC = pts[:,1:] - pts[:,0].reshape(-1,1,3)
     return cross(ABAC[:,0], ABAC[:,1], normed)
 
-def computeTriangleArea(pts):
+def computeTriangleArea(pts, signed = True):
     if pts.shape[1] == 2:
-        return simpleDet3x3(pad2Dto3D(pts, 1).T)/2
+        area = simpleDet3x3(pad2Dto3D(pts, 1).T)/2
+        return area if signed else np.abs(area)
     else:
         return norm(computeTriangleNormal(pts, False))/2
 
@@ -900,6 +901,13 @@ def computeTriangleAreas(pts, signed = True):
     else:
         return norm(computeTriangleNormals(pts, False))/2
 
+def computeTriangleGradients(pts):
+    dirs, lens = normVec(np.roll(pts, 1, axis=0) - np.roll(pts, -1, axis=0), True)
+    s = lens.sum()/2
+    area = np.sqrt(s * np.prod(s-lens))
+    #area = computeTriangleArea(pts, False)
+    return np.dot(dirs, Mr2D(np.pi/2)) * lens.reshape(-1,1) / (2 * area)
+
 def computeTetraVolume(pts):
     a, b, c = pts[1:] - pts[0]
     return np.abs(np.dot(cross(a,b), c) / 6.0)
@@ -907,6 +915,14 @@ def computeTetraVolume(pts):
 def computeTetraVolumes(ptss):
     abcs = ptss[:,1:] - ptss[:,0].reshape(-1,1,3)
     return np.abs(inner1d(cross(abcs[:,0], abcs[:,1]), abcs[:,2]) / 6.0)
+
+def computeTetraGradients(pts):
+    tris = [[1,2,3],[0,2,3],[0,1,3],[0,1,2]]
+    triNormals = computeTriangleNormals(pts[tris])
+    dps = inner1d(triNormals, pts[tris].mean(axis=1) - pts)
+    gradDirs = triNormals * -simpleSign(dps).reshape(-1,1)
+    gradDirs *= computeTriangleAreas(pts[tris], False).reshape(-1,1)
+    return gradDirs / (3 * computeTetraVolume(pts))
 
 def computePolyVolume(pts, faces):
     tris = facesToTris(faces) # works with convex faces only
@@ -1046,9 +1062,14 @@ def computeMinEulerAngles(A, Bs):
     return np.float32([alignBtoA(A, B, True) for B in Bs])
 
 def alignBtoA(A, B, angleOnly = False):
-    os = [[0,1,2],[1,2,0],[2,0,1],[0,2,1],[2,1,0],[1,0,2]]
-    ss = [[1,1,1],[1,1,-1],[1,-1,1],[1,-1,-1],[-1,1,1],[-1,1,-1],[-1,-1,1],[-1,-1,-1]]
-    Bs = np.tile(B[os],[8,1,1]) * np.repeat(ss, 6, axis=0).reshape(-1,3,1)
+    nDim = A.shape[0]
+    if nDim == 2:
+        os = [[0,1],[1,0]]
+        ss = [[1,1],[1,-1],[-1,1],[-1,-1]]
+    else:
+        os = [[0,1,2],[1,2,0],[2,0,1],[0,2,1],[2,1,0],[1,0,2]]
+        ss = [[1,1,1],[1,1,-1],[1,-1,1],[1,-1,-1],[-1,1,1],[-1,1,-1],[-1,-1,1],[-1,-1,-1]]
+    Bs = np.tile(B[os],[len(ss),1,1]) * np.repeat(ss, len(os), axis=0).reshape(-1,nDim,1)
     a = np.arccos(np.clip((innerAxBs(A,Bs).sum(axis=1)-1)/2,-1,1))
     return a.min() if angleOnly else Bs[np.argmin(a)]                
 
@@ -1057,7 +1078,7 @@ def alignBstoA(A, Bs):
 
 def computeMinTransformation(M):
     if len(M) == 2:
-        return Mr2D(np.arctan2(M[0,1], M[0,0]) % (np.pi/2))
+        return Mr2D(np.arctan2(M[0,1], M[0,0]) % (np.pi/2)).T
     argmax3 = lambda v: 0 if v[0] > max(v[1],v[2]) else (1 if v[1] > v[2] else 2)
     aM = np.abs(M)
     o0 = [0,1,2]
@@ -1149,3 +1170,59 @@ def vecsToOrthoMatrix(vs): # experimental
         vs = np.float32([computeAvgDirection(b) for b in vBuckets])
     return orthogonalizeMatrix(normVec(vs))
 
+def computeIsoContours(vs, ts, ss, isoValue, t = eps):
+    vIoMsk = ss > isoValue
+    vXoMsk = np.abs(ss - isoValue) < t
+    tIoCnt = vIoMsk[ts].sum(axis=1)
+    tMsk = np.bitwise_and(tIoCnt > 0, tIoCnt < 3)
+    #tMsk = np.bitwise_or(tMsk, vXoMsk[ts].any(axis=1))
+
+    class EdgeCollector:
+        verts, edges, vertKeyToIdx, edge = [], [], {}, []
+
+        def addVertex(self, v, vKey):
+            if vKey in self.vertKeyToIdx.keys():
+                self.edge.append(self.vertKeyToIdx[vKey])
+            else:
+                self.edge.append(len(self.verts))
+                self.vertKeyToIdx[vKey] = len(self.verts)
+                self.verts.append(v)
+
+        def flush(self):
+            if len(self.edge) == 2 and self.edge[0] != self.edge[1]:
+                self.edges.append(self.edge)
+            self.edge = []
+
+        def getVertsAndEdges(self):
+            return np.vstack(self.verts), np.vstack([pathToEdges(p) for p in edgesToPaths(self.edges)])
+
+    ec = EdgeCollector()
+    usedEdgesHashs = []
+    for tri in ts[tMsk]:
+        xMsk = vXoMsk[tri]
+        if xMsk.sum() == 1: # vertex on contour
+            e = tri[np.bitwise_not(xMsk)]
+            bCoords = 1-np.abs(isoValue - ss[e]) / np.abs(ss[e[1]] - ss[e[0]])
+            if np.any(bCoords < 0) or np.any(bCoords > 1) or np.abs(bCoords).sum() - 1 > eps:
+                continue
+            vIdx = tri[xMsk][0]
+            ec.addVertex(vs[vIdx], -vIdx)
+            ec.addVertex(np.dot(bCoords, vs[e]), cantorPi(e[0], e[1]))
+        elif xMsk.sum() == 2: # edge on contour
+            vIdx, vJdx = tri[xMsk]
+            eHash = cantorPi(vIdx, vJdx)
+            if eHash in usedEdgesHashs:
+                continue
+            usedEdgesHashs.append(eHash)
+            ec.addVertex(vs[vIdx], -vIdx)
+            ec.addVertex(vs[vJdx], -vJdx)
+        else: # nothing on contour
+            es = faceToEdges(tri)
+            es = es[vIoMsk[es].sum(axis=1) == 1]
+            bCoords = 1 - np.abs(isoValue - ss[es]) / np.abs(ss[es[:,1]] - ss[es[:,0]]).reshape(-1,1)
+            edgeVerts = innerVxM(bCoords, np.transpose(vs[es], axes=[0,2,1]))
+            for eVert, eHash in zip(edgeVerts, cantorPiV(es)):
+                ec.addVertex(eVert, eHash)
+        ec.flush()
+
+    return ec.getVertsAndEdges()

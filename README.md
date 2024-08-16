@@ -1,4 +1,5 @@
 # drbutil
+[![PyPI version](https://badge.fury.io/py/drbutil.svg)](https://badge.fury.io/py/drbutil)
 
 A tiny collection of geometry processing routines frequently used in my prototyping code.
 
