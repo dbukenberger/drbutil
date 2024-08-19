@@ -295,15 +295,65 @@ def writeMeshFile(filePath, vertices, hexas): # hex
 
         fh.write('End\n')
 
-def writeMshFile(filePath, vertices, tets): # tet
+def loadMshFile(filePath):
+    verts = []
+    tets = []
+    with open(filePath, 'r') as fh:
+        mode = None
+        skipOne = False
+        for line in fh.readlines():
+            line = line.strip()
+
+            if line == 'End':
+                break
+
+            if '$Nodes' in line:
+                mode = 'verts'
+                skipOne = True
+                continue
+
+            if '$EndNodes' in line:
+                mode = None
+
+            if '$Elements' in line:
+                mode = 'tet'
+                skipOne = True
+                continue
+
+            if '$EndElements' in line:
+                mode = None
+
+            if skipOne:
+                skipOne = False
+                continue
+            
+            if mode == 'verts':
+                verts.append(line.strip().split(' ')[1:])
+
+            if mode == 'tet':
+                tets.append(line.strip().split(' ')[-4:])
+
+    res = [np.float32(verts)]
+    if len(tets):
+        res.append(np.int32(tets)-1)
+
+    return res
+
+def writeMshFile(filePath, vertices, tets, cols = []): # tet
     with open(filePath, 'w') as fh:
         fh.write('$MeshFormat\n2.2 0 8\n$EndMeshFormat\n$Nodes\n%d\n'%len(vertices))
         for i, vertex in enumerate(vertices):
             fh.write('%d %0.6f %0.6f %0.6f\n'%(i+1, vertex[0], vertex[1], vertex[2]))
         fh.write('$EndNodes\n$Elements\n%d\n'%len(tets))
         for i,tet in enumerate(tets+1):
-            fh.write('%d 4 2 0 0 %d %d %d %d\n'%(i+1, tet[0], tet[1], tet[2], tet[3]))
+            fh.write('%d 4 0 %d %d %d %d\n'%(i+1, tet[0], tet[1], tet[2], tet[3]))
         fh.write('$EndElements\n')
+
+        if len(cols):
+            fh.write('$ElementData\n1\n"color"\n1\n0.0\n3\n0\n1\n%d\n'%len(cols))
+            for i,col in enumerate(cols):
+                fh.write('%d %g\n'%(i+1, col))
+            fh.write('$EndElementData\n')
 
 def writeStressFile(fileName, verts, cells, forceIdxs, forceVecs, fixedIdxs, stress):
     with open(fileName, 'w') as fh:
