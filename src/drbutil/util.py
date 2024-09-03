@@ -27,7 +27,10 @@ def faceToEdges(face):
     return np.transpose([face, np.roll(face, -1)])
 
 def facesToEdges(faces, filterUnique = True):
-    es = np.vstack([faceToEdges(face) for face in faces])
+    if type(faces) == list:
+        es = np.vstack([faceToEdges(face) for face in faces])
+    else:
+        es = np.transpose([faces.ravel(), np.roll(faces, -1, axis=1).ravel()])
     return filterForUniqueEdges(es) if filterUnique else es
 
 def facesToTris(faces):
@@ -77,59 +80,72 @@ def hexaToFaces(hexa):
 def hexasToFaces(hexas):
     return np.vstack(hexas[...,sixCubeFaces])
 
-def edgesToPath(edgesIn):
+def edgesToPath(edgesIn, withClosedFlag = False):
     edges = copy.deepcopy(edgesIn) if type(edgesIn) == list else edgesIn.tolist()
-    nLim = np.arange(len(edges) - 1).sum()
-    nTries = 0
-    face = edges.pop(0)
-    while len(edges):
-        edge = edges.pop(0)
-        if face[0] == edge[0]:
-            face.insert(0, edge[1])
-        elif face[-1] == edge[0]:
-            face.append(edge[1])
-        elif face[0] == edge[1]:
-            face.insert(0, edge[0])
-        elif face[-1] == edge[1]:
-            face.append(edge[0])
-        else:
-            edges.append(edge)
-            nTries += 1
-        if nTries > nLim:
-            return
-    return face if face[0] != face[-1] else face[:-1]
-
-def edgesToPaths(edgesIn):
-    edges = copy.deepcopy(edgesIn) if type(edgesIn) == list else edgesIn.tolist()
-    face = edges.pop(0)
-    faces = []
+    path = edges.pop(0)
     iters = 0
     while len(edges):
         edge = edges.pop(0)
-        if face[0] == edge[0]:
-            face.insert(0, edge[1])
+        if path[0] == edge[0]:
+            path.insert(0, edge[1])
             iters = 0
-        elif face[-1] == edge[0]:
-            face.append(edge[1])
+        elif path[-1] == edge[0]:
+            path.append(edge[1])
             iters = 0
-        elif face[0] == edge[1]:
-            face.insert(0, edge[0])
+        elif path[0] == edge[1]:
+            path.insert(0, edge[0])
             iters = 0
-        elif face[-1] == edge[1]:
-            face.append(edge[0])
+        elif path[-1] == edge[1]:
+            path.append(edge[0])
+            iters = 0
+        else:
+            edges.append(edge)
+            iters += 1
+        if len(edges) and iters > len(edges):
+            break
+    if path[0] == path[-1]:
+        return (path[:-1], True) if withClosedFlag else path[:-1]
+    else:
+        return (path, False) if withClosedFlag else path
+
+def edgesToPaths(edgesIn, withClosedFlag = False):
+    edges = copy.deepcopy(edgesIn) if type(edgesIn) == list else edgesIn.tolist()
+    path = edges.pop(0)
+    paths = []
+    closed = []
+    iters = 0
+    while len(edges):
+        edge = edges.pop(0)
+        if path[0] == edge[0]:
+            path.insert(0, edge[1])
+            iters = 0
+        elif path[-1] == edge[0]:
+            path.append(edge[1])
+            iters = 0
+        elif path[0] == edge[1]:
+            path.insert(0, edge[0])
+            iters = 0
+        elif path[-1] == edge[1]:
+            path.append(edge[0])
             iters = 0
         else:
             edges.append(edge)
             iters += 1
         if len(edges) and iters >= len(edges):
             iters = 0
-            faces.append(copy.deepcopy(face if face[0] != face[-1] else face[:-1]))
-            face = edges.pop(0)
-    faces.append(face if face[0] != face[-1] else face[:-1])
-    return faces
+            closed.append(path[0] == path[-1])
+            paths.append(copy.deepcopy(path[:-1] if closed[-1] else path))
+            path = edges.pop(0)
+    closed.append(path[0] == path[-1])
+    paths.append(path[:-1] if closed[-1] else path)
+    return (paths, closed) if withClosedFlag else paths
 
-def pathToEdges(path):
-    return np.transpose([path, np.roll(path, -1)])
+def pathToEdges(path, closed = True):
+    es = np.transpose([path, np.roll(path, -1)])
+    return es if closed else es[:-1]
+
+def groupEdges(edges):
+    return [pathToEdges(path, closed) for path, closed in zip(*edgesToPaths(edges, True))]
 
 def quaternionToMatrix(q):
     w, x, y, z = q
@@ -237,6 +253,8 @@ def outer1d(us, vs): return np.einsum('ij,ih->ijh', us, vs)
 
 def outer2dWeighted(us, vs, ws): return np.sum([outer1d(us[:,d], vs[:,d]) * ws[:,d].reshape(-1,1,1) for d in range(us.shape[1])], axis=0)
 #def outer2dWeighted(us, vs, ws): return np.einsum('ijk,ijh,ij->ikh', us, vs, ws) # equivalent but slower =(
+
+def dotAxBs(A, Bs): return np.einsum('jk,ijl->ikl', A, Bs) # np.float32([np.dot(A, B) for B in Bs])
 
 def Mr2D(a): return np.float32([[np.cos(a), -np.sin(a)], [np.sin(a), np.cos(a)]])
 
@@ -392,6 +410,23 @@ def generateIcoSphere(nSubdiv = 0, likeBlender = False):
 
     return verts, tris
 
+def generateSamples(vs, elems, n = None, weights = None):
+    nDim = vs.shape[1]
+    if n is None:
+        n = len(elems)
+    if weights is None:
+        weights = norm(vs[elems[:,0]] - vs[elems[:,1]]) if nDim == 2 else computeTriangleAreas(vs[elems], False)
+
+    wCum = np.cumsum(weights)
+    randomIdxs = np.searchsorted(wCum, np.random.rand(n) * wCum[-1])
+    # faster but idxs array can get huuge
+    #idxs = np.repeat(np.arange(len(elems)), np.int32(weights / weights.min()))
+    #randomeIdxs = idxs[np.random.randint(0, len(idxs), n)]
+           
+    bWeights = np.random.rand(n, nDim)**(nDim-1)
+    bWeights /= bWeights.sum(axis=1).reshape(-1,1)
+    return (bWeights[:,:,np.newaxis] * vs[elems[randomIdxs]]).sum(axis=1)
+
 def distPointToEdge(A, B, P):
     AtoB = B - A
     AtoP = P - A
@@ -518,6 +553,16 @@ def pointInTriangles3D(ABCs, P, uvws = None, ns = None, assumeInPlane = False):
             return False
     return True
 
+def pointInPolygon2D(pPts, p):
+    #es = pPts[np.roll(np.repeat(np.arange(4), 2), -1).reshape(-1,2)]
+    es = np.stack([pPts, np.roll(pPts, -1, axis=0)], axis=1)
+    iPts = intersectEdgesEdge2D(es, [p, pPts.max(axis=0)+1])
+    return iPts is not None and len(iPts)%2
+
+def pointInTriHull3D(ABCs, p):
+    ts = intersectTrianglesWithRay(ABCs, p, normVec(ABCs.max(axis=0).max(axis=0) - p))
+    return len(ts)%2    
+
 def arePointsCoplanar(pts):
     if len(pts) <= 3:
         return True
@@ -556,63 +601,38 @@ def intersectTrianglesWithEdge(ABCs, PQ, ns = None):
     ns = computeTriangleNormals(ABCs) if ns is None else ns
     sP = simpleSign(inner1d(PQ[0] - ABCs[:,0], ns))
     sQ = simpleSign(inner1d(PQ[1] - ABCs[:,0], ns))
+    sMsk = sP != sQ
+    if not sMsk.any():
+        return False
 
-    O = PQ[0]
-    D = PQ[1]-PQ[0]
-    Dlen = norm(D)
-    D /= Dlen
-    ts = []
-    for ABC in ABCs[sP != sQ]:
-        # moeller trumbore
-        A,B,C = ABC
-        e1 = B-A
-        e2 = C-A
-        h = cross(D, e2)
-        a = np.dot(e1, h)
-        if a > -eps and a < eps:
-            continue
-        f = 1/a
-        s = O - A
-        u = f * np.dot(s, h)
-        if u < 0 or u > 1:
-            continue
-        q = cross(s, e1)
-        v = f * np.dot(D, q)
-        if v < 0 or (u+v) > 1:
-            continue
-        t = f * np.dot(e2, q)
-        if t > eps:
-            if t < Dlen:
-                return True
-    return False     
-    
+    D, eLen = normVec(PQ[1]-PQ[0], True)
+    ts = intersectTrianglesWithRay(ABCs[sMsk], PQ[0], D)
+    return len(ts) and ts.min() < eLen
+
 def intersectTrianglesWithRay(ABCs, O, D):
-    tMin = None
-    ts = []
-    for ABC in ABCs:
+    e1s = ABCs[:,1] - ABCs[:,0]
+    e2s = ABCs[:,2] - ABCs[:,0]
+    hs = cross(D, e2s)
+    dps = inner1d(e1s, hs)
 
-        # moeller trumbore
-        A,B,C = ABC
-        e1 = B-A
-        e2 = C-A
-        h = cross(D, e2)
-        a = np.dot(e1, h)
-        if a > -eps and a < eps:
-            continue
-        f = 1/a
-        s = O - A
-        u = f * np.dot(s, h)
-        if u < 0 or u > 1:
-            continue
-        q = cross(s, e1)
-        v = f * np.dot(D, q)
-        if v < 0 or (u+v) > 1:
-            continue
-        t = f * np.dot(e2, q)
-        if t > eps:
-            tMin = t if tMin is None else min(t, tMin)
-            ts.append(t)
-    return ts
+    zMsk = np.abs(dps) > eps
+    if not zMsk.any():
+        return []
+    fs = 1/dps[zMsk]
+    ss = O - ABCs[zMsk,0]
+    us = inner1d(ss, hs[zMsk]) * fs
+
+    uMsk = np.bitwise_and(us >= 0, us <= 1)
+    if not uMsk.any():
+        return []
+    qs = cross(ss[uMsk], e1s[zMsk][uMsk])
+    vs = inner1d(D, qs) * fs[uMsk]
+
+    vMsk = np.bitwise_and(vs >= 0, (us[uMsk] + vs) <= 1)
+    if not vMsk.any():
+        return []
+    ts = inner1d(e2s[zMsk][uMsk][vMsk], qs[vMsk]) * fs[uMsk][vMsk]
+    return ts[ts>eps]
 
 # does not cover total inclusion
 def polyhedraDoIntersect(aVerts, bVerts, aTris, bTris, aEdges, bEdges, aTrisNormals = None, bTrisNormals = None):
@@ -727,6 +747,25 @@ def pyrasDoIntersect(ptsA, ptsB, nsA, nsB):
 def intersectLinesLine2D(ons, o, n):
     ss = np.dot(ons[:,0] - o, n) / np.dot(ons[:,1], orthoVec(n))
     return ons[:,0] + orthoVec(ons[:,1]) * ss.reshape(-1,1)
+
+def intersectEdgesEdge2D(es, e, withIdxs = False):
+    eDir = e[1]-e[0]
+    eOrt = orthoVec(eDir)
+
+    s0 = simpleSign(np.dot(es[:,0] - e[0], eOrt))
+    s1 = simpleSign(np.dot(es[:,1] - e[0], eOrt))
+    cMsk = s0 != s1
+    if not cMsk.any():
+        return (None, None) if withIdxs else None
+
+    eDirs = es[cMsk,1]-es[cMsk,0]
+    ss = inner1d(e[0] - es[cMsk,0], orthoVec(eDirs)) / np.dot(eDirs, eOrt)
+    iMsk = np.bitwise_and(ss >= 0, ss <= 1)
+
+    if not iMsk.any():
+        return (None, None) if withIdxs else None
+    iPts = e[0] + eDir * ss[iMsk].reshape(-1,1)
+    return (iPts, np.where(cMsk)[0][iMsk]) if withIdxs else iPts
 
 def intersectEdgePlane(pts, o, n, sane=True):
     if not sane:
@@ -879,6 +918,17 @@ def computePolygonCentroid2D(pts, withArea=False):
     centroid = np.sum((pts + rPts) * w.reshape(-1,1), axis=0) / (6 * area)
     return (centroid, np.abs(area)) if withArea else centroid
 
+def computeTriangleAngles(pts):
+    return computePolygonAngles(pts)
+
+def computeTrianglesAngles(ptss):
+    ds = normVec(np.roll(ptss, -1, axis=1) - ptss)
+    return np.arccos(np.clip(inner1d(np.vstack(ds), np.vstack(-np.roll(ds, 1, axis=1))), -1, 1)).reshape(-1,3)
+
+def computePolygonAngles(pts):
+    ds = normVec(np.roll(pts, -1, axis=0) - pts)
+    return np.arccos(np.clip(inner1d(ds, -np.roll(ds, 1, axis=0)), -1, 1))
+
 def computeTriangleNormal(pts, normed = True):
     AB, AC = pts[1:] - pts[0] if pts.ndim < 3 else (pts[:,1:] - pts[:,0].reshape(-1,1,3)).T
     return cross(AB, AC, normed)
@@ -901,12 +951,32 @@ def computeTriangleAreas(pts, signed = True):
     else:
         return norm(computeTriangleNormals(pts, False))/2
 
+def computeTriangleEdgeCenters(pts):
+    return (pts + np.roll(pts, 1, axis=0))/2
+
+def computeTriangleEdgeCenterss(ptss):
+    return (ptss + np.roll(ptss, 1, axis=1))/ 2
+
 def computeTriangleGradients(pts):
     dirs, lens = normVec(np.roll(pts, 1, axis=0) - np.roll(pts, -1, axis=0), True)
     s = lens.sum()/2
     area = np.sqrt(s * np.prod(s-lens))
     #area = computeTriangleArea(pts, False)
     return np.dot(dirs, Mr2D(np.pi/2)) * lens.reshape(-1,1) / (2 * area)
+
+def computeGaussianCurvatures(vs, ts): # per vertex
+    angles = computeTrianglesAngles(vs[ts])
+    return (np.pi * 2) - np.bincount(ts.ravel(), weights = angles.ravel())
+
+def computeSummedEdgeAngles(vs, ts): # per vertex, only closed manifolds
+    edges = facesToEdges(ts, False)
+    eHashs = cantorPiV(edges)
+    uHashs, uIdxs = np.unique(eHashs, return_index=True)
+    eFaceIdxs = np.repeat(np.arange(len(ts)), 3)[np.argsort(eHashs)].reshape(-1,2)
+
+    triNormals = computeTriangleNormals(vs[ts])
+    perEdgeAngles = np.arccos(np.clip(inner1d(triNormals[eFaceIdxs[:,0]], triNormals[eFaceIdxs[:,1]]), -1, 1))
+    return np.bincount(edges[uIdxs].ravel(), weights = np.repeat(perEdgeAngles, 2))    
 
 def computeTetraVolume(pts):
     a, b, c = pts[1:] - pts[0]
@@ -915,6 +985,18 @@ def computeTetraVolume(pts):
 def computeTetraVolumes(ptss):
     abcs = ptss[:,1:] - ptss[:,0].reshape(-1,1,3)
     return np.abs(inner1d(cross(abcs[:,0], abcs[:,1]), abcs[:,2]) / 6.0)
+
+def computeTetraEdgeCenters(pts):
+    return np.vstack([pts[0] + pts[1:], pts[1:] + np.roll(pts[1:], 1, axis=0)])/2
+
+def computeTetraEdgeCenterss(ptss):
+    return np.concatenate([ptss[:,0,np.newaxis] + ptss[:,1:], ptss[:,1:] + np.roll(ptss[:,1:], 1, axis=1)], axis=1)/2
+
+def computeTetraTriCenters(pts):
+    return np.dot(1 - np.eye(4), pts)/3
+
+def computeTetraTriCenterss(ptss):
+    return dotAxBs(1 - np.eye(4), ptss)/3
 
 def computeTetraGradients(pts):
     tris = [[1,2,3],[0,2,3],[0,1,3],[0,1,2]]
@@ -1194,7 +1276,7 @@ def computeIsoContours(vs, ts, ss, isoValue, t = eps):
             self.edge = []
 
         def getVertsAndEdges(self):
-            return np.vstack(self.verts), np.vstack([pathToEdges(p) for p in edgesToPaths(self.edges)])
+            return np.vstack(self.verts), np.vstack(groupEdges(self.edges))
 
     ec = EdgeCollector()
     usedEdgesHashs = []
