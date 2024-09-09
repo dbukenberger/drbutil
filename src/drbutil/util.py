@@ -411,7 +411,7 @@ def generateIcoSphere(nSubdiv = 0, likeBlender = False):
     return verts, tris
 
 def generateSamples(vs, elems, n = None, weights = None):
-    nDim = vs.shape[1]
+    nDim = elems.shape[1]
     if n is None:
         n = len(elems)
     if weights is None:
@@ -558,6 +558,10 @@ def pointInPolygon2D(pPts, p):
     es = np.stack([pPts, np.roll(pPts, -1, axis=0)], axis=1)
     iPts = intersectEdgesEdge2D(es, [p, pPts.max(axis=0)+1])
     return iPts is not None and len(iPts)%2
+
+def pointInPolygons2D(pts, plys, p):
+    ios = [pointInPolygon2D(pts[ply], p) for ply in plys]
+    return sum(ios)%2
 
 def pointInTriHull3D(ABCs, p):
     ts = intersectTrianglesWithRay(ABCs, p, normVec(ABCs.max(axis=0).max(axis=0) - p))
@@ -968,7 +972,7 @@ def computeGaussianCurvatures(vs, ts): # per vertex
     angles = computeTrianglesAngles(vs[ts])
     return (np.pi * 2) - np.bincount(ts.ravel(), weights = angles.ravel())
 
-def computeSummedEdgeAngles(vs, ts): # per vertex, only closed manifolds
+def computeDihedralAngles(vs, ts, returnUnique = True): # per edge, only closed manifolds
     edges = facesToEdges(ts, False)
     eHashs = cantorPiV(edges)
     uHashs, uIdxs = np.unique(eHashs, return_index=True)
@@ -976,7 +980,31 @@ def computeSummedEdgeAngles(vs, ts): # per vertex, only closed manifolds
 
     triNormals = computeTriangleNormals(vs[ts])
     perEdgeAngles = np.arccos(np.clip(inner1d(triNormals[eFaceIdxs[:,0]], triNormals[eFaceIdxs[:,1]]), -1, 1))
+    return (edges[uIdxs], perEdgeAngles) if returnUnique else (edges, uIdxs, perEdgeAngles)
+
+def computeSummedEdgeAngles(vs, ts): # per vertex, only closed manifolds
+    edges, uIdxs, perEdgeAngles = computeDihedralAngles(vs, ts, False)
     return np.bincount(edges[uIdxs].ravel(), weights = np.repeat(perEdgeAngles, 2))    
+
+def filterForManifoldness(vs, ts):
+    edges = facesToEdges(ts, False)
+    eHashs = cantorPiV(edges)
+    uHashs, uCts = np.unique(eHashs, return_counts=True)
+
+    teMap = eHashs.reshape(-1,3)
+    tMsk = np.ones(len(ts), np.bool_)
+    for singleEdgeHash in uHashs[uCts == 1]:
+        tMsk[np.any(teMap == singleEdgeHash, axis=1)] = False
+
+    if not tMsk.any():
+        warnings.warn('No manifold extracted, mesh probably open.')
+        return None
+
+    if tMsk.all():
+        return vs, ts
+
+    mts = ts[tMsk]
+    return filterForManifoldness(vs[np.unique(mts.ravel())], reIndexIndices(mts))
 
 def computeTetraVolume(pts):
     a, b, c = pts[1:] - pts[0]
