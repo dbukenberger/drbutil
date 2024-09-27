@@ -53,6 +53,14 @@ def hexasToEdges(hexas):
     es.sort(axis=1)
     return unique2d(es)
 
+def hexOrderBT2Dg(hexa):
+    o = [0,4,3,1,7,5,2,6]
+    return hexa[o] if hexa.ndim == 1 else hexa[:,o]
+
+def hexOrderDg2BT(hexa):
+    o = [0,2,6,3,1,4,7,5]
+    return hexa[o] if hexa.ndim == 1 else hexa[:,o]
+
 def tetToEdges(tet):
     return np.transpose([tet[[0,1,2,1,2,3]], tet[[1,2,3,3,0,0]]])
 
@@ -829,6 +837,14 @@ def aaProject3Dto2D(verts):
     pVerts = verts - pDir * np.dot(verts, pDir).reshape(-1,1)
     return pVerts[:, np.int32([pDim + 1, pDim + 2]) % 3]   
 
+def ringNeighborElements(elements, vIdxs, n = 0):
+    msk = np.zeros(len(elements), np.bool_)
+    for vIdx in vIdxs:
+        msk = np.bitwise_or(msk, np.any(elements == vIdx, axis=1))
+
+    eMasked = elements[msk]
+    return ringNeighborElements(elements, np.unique(eMasked.ravel()), n-1) if n else eMasked
+
 def computeConvexPolygonVertexOrder(pts, refPt = None):
     cPt = pts.mean(axis=0)
     if refPt is not None:
@@ -967,6 +983,32 @@ def computeTriangleGradients(pts):
     area = np.sqrt(s * np.prod(s-lens))
     #area = computeTriangleArea(pts, False)
     return np.dot(dirs, Mr2D(np.pi/2)) * lens.reshape(-1,1) / (2 * area)
+
+def computeBaryWeights(tVerts, pt):
+    if len(pt) == 2:
+        tVertss = np.repeat([tVerts],4,axis=0)
+        tVertss[[0,1,2],[0,1,2]] = pt
+        ws = computeTriangleAreas(tVertss)
+    else:
+        tVertss = np.repeat([tVerts],5,axis=0)
+        tVertss[[0,1,2,3],[0,1,2,3]] = pt
+        ws = computeTetraVolumes(tVertss)
+    return ws[:-1] / ws[-1]
+
+def computeBaryWeightss(tVertss, pt):
+    if len(pt) == 2:
+        tIdxs = np.arange(len(tVertss)*4).reshape(-1,4)[:,:-1].ravel()
+        vIdxs = np.arange(len(tVertss)*3) % 3
+        tVertss = np.repeat(tVertss, 4, axis=0)
+        tVertss[tIdxs, vIdxs] = pt
+        ws = getTriangleAreas(tVertss).reshape(-1,4)
+    else:
+        tIdxs = np.arange(len(tVertss)*5).reshape(-1,5)[:,:-1].ravel()
+        vIdxs = np.arange(len(tVertss)*4) % 4
+        tVertss = np.repeat(tVertss, 5, axis=0)
+        tVertss[tIdxs, vIdxs] = pt
+        ws = computeTetraVolumes(tVertss).reshape(-1,5)
+    return ws[:,:-1] / ws[:,-1].reshape(-1,1)
 
 def computeGaussianCurvatures(vs, ts): # per vertex
     angles = computeTrianglesAngles(vs[ts])
@@ -1189,7 +1231,7 @@ def alignBstoA(A, Bs):
 def computeMinTransformation(M):
     if len(M) == 2:
         return Mr2D(np.arctan2(M[0,1], M[0,0]) % (np.pi/2)).T
-    argmax3 = lambda v: 0 if v[0] > max(v[1],v[2]) else (1 if v[1] > v[2] else 2)
+    argmax3 = lambda v: 0 if v[0] > max(v[1],v[2]+eps) else (1 if v[1] > v[2]+eps else 2)
     aM = np.abs(M)
     o0 = [0,1,2]
     o = [o0.pop(argmax3(aM[:,0]))] + (o0 if aM[o0[0],1] > aM[o0[1],1] else o0[::-1])
