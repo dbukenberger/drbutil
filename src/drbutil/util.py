@@ -435,6 +435,57 @@ def generateSamples(vs, elems, n = None, weights = None):
     bWeights /= bWeights.sum(axis=1).reshape(-1,1)
     return (bWeights[:,:,np.newaxis] * vs[elems[randomIdxs]]).sum(axis=1)
 
+@memoize
+def generateTriGridSampleWeights(n, innerOnly = False):
+    ws = []
+    for i in range(innerOnly, n):
+        for j in range(innerOnly, n - i):
+            k = (n-1) - i - j
+            if innerOnly and not k:
+                continue
+            ws.append([i,j,k])
+    return np.float32(ws) / (n-1)
+
+@memoize
+def generateQuadGridSampleWeights(n, innerOnly = False):
+    ws = np.linspace(0,1,n)
+    if innerOnly:
+        ws = ws[1:-1]
+    u,v = np.dstack(np.meshgrid(ws, ws)).reshape(-1,2).T
+    return np.transpose([(1-u)*(1-v), u*(1-v), u*v, (1-u)*v])
+
+@memoize
+def generateTetGridSampleWeights(n, innerOnly = False):
+    ws = []
+    for i in range(innerOnly, n):
+        for j in range(innerOnly, n - i):
+            for k in range(innerOnly, n - i - j):
+                l = (n-1) - i - j - k
+                if innerOnly and not l:
+                    continue
+                ws.append([i,j,k,l])
+    return np.float32(ws) / (n-1)
+
+@memoize
+def generateHexGridSampleWeights(n, innerOnly = False):
+    ws = np.linspace(0,1,n)
+    if innerOnly:
+        ws = ws[1:-1]
+    u,v,w = np.stack(np.meshgrid(ws, ws, ws), axis=3).reshape(-1, 3).T
+    return np.transpose([(1-u)*(1-v)*(1-w), u*(1-v)*(1-w), u*v*(1-w), (1-u)*v*(1-w), (1-u)*(1-v)*w, u*(1-v)*w, u*v*w, (1-u)*v*w])
+
+def generateTriGridSamples(pts, n, innerOnly = False):
+    return np.dot(generateTriGridSampleWeights(n, innerOnly), pts) if n else pts
+
+def generateQuadGridSamples(pts, n, innerOnly = False):
+    return np.dot(generateQuadGridSampleWeights(n, innerOnly), pts) if n else pts
+
+def generateTetGridSamples(pts, n, innerOnly = False):
+    return np.dot(generateTetGridSampleWeights(n, innerOnly), pts) if n else pts
+
+def generateHexGridSamples(pts, n, innerOnly = False):
+    return np.dot(generateHexGridSampleWeights(n, innerOnly), pts) if n else pts
+
 def distPointToEdge(A, B, P):
     AtoB = B - A
     AtoP = P - A

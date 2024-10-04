@@ -91,8 +91,17 @@ class Logger:
         fmtArgs = style % tplArgs if style is not None else str(tplArgs)
         self.log.info(msg + ':\t' + fmtArgs)
 
+# simple memoizer, use with @memoize decorator
+class memoize:
+    def __init__(self, f):
+        self.f = f
+        self.memDict = {}
+    def __call__(self, *args):
+        if args not in self.memDict:
+            self.memDict[args] = self.f(*args)
+        return self.memDict[args]
+builtins.memoize = memoize
 
 from .__version__ import __version__
-#from .cvt import *
 from .util import *
 from .io import *
