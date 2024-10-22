@@ -88,7 +88,7 @@ def hexaToFaces(hexa):
 def hexasToFaces(hexas):
     return np.vstack(hexas[...,sixCubeFaces])
 
-def edgesToPath(edgesIn, withClosedFlag = False):
+def edgesToPath(edgesIn, withClosedFlag = False, returnPartial = False):
     edges = copy.deepcopy(edgesIn) if type(edgesIn) == list else edgesIn.tolist()
     path = edges.pop(0)
     iters = 0
@@ -110,7 +110,10 @@ def edgesToPath(edgesIn, withClosedFlag = False):
             edges.append(edge)
             iters += 1
         if len(edges) and iters > len(edges):
-            break
+            if returnPartial:
+                break
+            else:
+                return
     if path[0] == path[-1]:
         return (path[:-1], True) if withClosedFlag else path[:-1]
     else:
@@ -486,18 +489,23 @@ def generateTetGridSamples(pts, n, innerOnly = False):
 def generateHexGridSamples(pts, n, innerOnly = False):
     return np.dot(generateHexGridSampleWeights(n, innerOnly), pts) if n else pts
 
-def distPointToEdge(A, B, P):
+def distPointToEdge(A, B, P, withClosest = False):
     AtoB = B - A
     AtoP = P - A
     BtoP = P - B
     
     if np.dot(AtoB, AtoP) <= 0:
-        return norm(AtoP)
+        dist = norm(AtoP)
+        closest = A
     elif np.dot(-AtoB, BtoP) <= 0:
-        return norm(BtoP)
+        dist = norm(BtoP)
+        closest = B
     else:
         d = normVec(AtoB)
-        return norm(AtoP-np.dot(AtoP,d)*d)
+        AtoC = np.dot(AtoP, d) * d
+        dist = norm(AtoP-AtoC)
+        closest = A + AtoC
+    return (dist, closest) if withClosest else dist
 
 def distPointsToEdge(A, B, Ps):
     AtoB = B - A
@@ -1052,7 +1060,7 @@ def computeBaryWeightss(tVertss, pt):
         vIdxs = np.arange(len(tVertss)*3) % 3
         tVertss = np.repeat(tVertss, 4, axis=0)
         tVertss[tIdxs, vIdxs] = pt
-        ws = getTriangleAreas(tVertss).reshape(-1,4)
+        ws = computeTriangleAreas(tVertss).reshape(-1,4)
     else:
         tIdxs = np.arange(len(tVertss)*5).reshape(-1,5)[:,:-1].ravel()
         vIdxs = np.arange(len(tVertss)*4) % 4
