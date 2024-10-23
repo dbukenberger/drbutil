@@ -457,7 +457,7 @@ def loadStressFile(fileName):
     for i, sMat in enumerate(sMats):
         pStress[i], pStressE[i] = computePrincipalStress(sMat)
 
-    return verts, cells, forceIdxs, forceVecs, fixedIdxs, vmStress, pStress, pStressE, sMats
+    return verts, cells, forceIdxs, forceVecs.reshape(-1, nDim), fixedIdxs, vmStress, pStress, pStressE, sMats
 
 def loadVtkFile(fileName):
     verts = []

@@ -18,15 +18,19 @@ builtins.quadVerts = np.float32([[-1,-1],[-1,1],[1,1],[1,-1]])
 builtins.cubeVerts = np.float32([[-1,-1,-1],[-1,1,-1],[1,1,-1],[1,-1,-1],[-1,-1,1],[-1,1,1],[1,1,1],[1,-1,1]])
 builtins.sixCubeFaces = np.int32([[0,1,2,3],[4,0,3,7],[5,1,0,4],[7,3,2,6],[1,5,6,2],[5,4,7,6]])
 
-# log and result directories
-logDir = 'logs/'
-resDir = 'results/'
-for pDir in [logDir, resDir]:
-    if not os.path.exists(pDir):
+# useful directories
+builtins.datDir = 'data/'
+builtins.logDir = 'logs/'
+builtins.resDir = 'results/'
+builtins.tmpDir = 'temp/'
+def makeDir(dirName):
+    if not os.path.exists(dirName):
         try:
-            os.mkdir(pDir)
+            os.mkdir(dirName)
         except PermissionError:
             pass
+for pDir in [builtins.datDir, builtins.logDir, builtins.resDir, builtins.tmpDir]:
+    makeDir(pDir)
 
 # for visualizing 2D results
 try:
@@ -84,7 +88,7 @@ class Logger:
     def __init__(self, logName):
         self.log = logging.getLogger(logName)
         self.log.setLevel(logging.INFO)
-        self.log.addHandler(logging.FileHandler(logDir + '%s.log' % logName, mode='w'))
+        self.log.addHandler(logging.FileHandler(builtins.logDir + '%s.log' % logName, mode='w'))
 
     def logThis(self, msg, args, style=None):
         tplArgs = args if not hasattr(args, '__len__') or type(args) == str else tuple(args)
