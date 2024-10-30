@@ -395,8 +395,13 @@ def generatePointsOnCircle(n, in3D = False, withCenter = False):
     return pad2Dto3D(pts) if in3D else pts
 
 def generateIcoSphere(nSubdiv = 0, likeBlender = False):
+    if nSubdiv < 0:
+        verts = generatePointsOnCircle(3, True, True)
+        verts[:,-1] += np.float32([-1,-1,-1,3]) * np.sqrt(2)/4
+        tris = np.int32([[0,2,1],[0,1,3],[1,2,3],[0,3,2]])
+        return normVec(verts), tris
+    
     t = (1 + np.sqrt(5)) / 2
-
     if likeBlender:
         # blender subdiv is different, but okay for first two levels
         verts = normVec(np.float32([[-t,0,-1],[0,-1,-t],[-1,-t,0],[-t,0,1],[-1,t,0],[0,1,-t],[1,-t,0],[0,-1,t],[0,1,t],[1,t,0],[t,0,-1],[t,0,1]]))
@@ -437,6 +442,7 @@ def generateSamples(vs, elems, n = None, weights = None):
 
 @memoize
 def generateTriGridSampleWeights(n, innerOnly = False):
+    n = max(2,n+2)
     ws = []
     for i in range(innerOnly, n):
         for j in range(innerOnly, n - i):
@@ -448,6 +454,7 @@ def generateTriGridSampleWeights(n, innerOnly = False):
 
 @memoize
 def generateQuadGridSampleWeights(n, innerOnly = False):
+    n = max(2,n+2)
     ws = np.linspace(0,1,n)
     if innerOnly:
         ws = ws[1:-1]
@@ -456,6 +463,7 @@ def generateQuadGridSampleWeights(n, innerOnly = False):
 
 @memoize
 def generateTetGridSampleWeights(n, innerOnly = False):
+    n = max(2,n+2)
     ws = []
     for i in range(innerOnly, n):
         for j in range(innerOnly, n - i):
@@ -468,6 +476,7 @@ def generateTetGridSampleWeights(n, innerOnly = False):
 
 @memoize
 def generateHexGridSampleWeights(n, innerOnly = False):
+    n = max(2,n+2)
     ws = np.linspace(0,1,n)
     if innerOnly:
         ws = ws[1:-1]
@@ -475,16 +484,94 @@ def generateHexGridSampleWeights(n, innerOnly = False):
     return np.transpose([(1-u)*(1-v)*(1-w), u*(1-v)*(1-w), u*v*(1-w), (1-u)*v*(1-w), (1-u)*(1-v)*w, u*(1-v)*w, u*v*w, (1-u)*v*w])
 
 def generateTriGridSamples(pts, n, innerOnly = False):
-    return np.dot(generateTriGridSampleWeights(n, innerOnly), pts) if n else pts
+    return np.dot(generateTriGridSampleWeights(n, innerOnly), pts) if n-2*innerOnly >= 0 else np.empty((0, pts.shape[1]), np.float32)
 
 def generateQuadGridSamples(pts, n, innerOnly = False):
-    return np.dot(generateQuadGridSampleWeights(n, innerOnly), pts) if n else pts
+    return np.dot(generateQuadGridSampleWeights(n, innerOnly), pts)
 
 def generateTetGridSamples(pts, n, innerOnly = False):
-    return np.dot(generateTetGridSampleWeights(n, innerOnly), pts) if n else pts
+    return np.dot(generateTetGridSampleWeights(n, innerOnly), pts) if n-3*innerOnly >= 0 else np.empty((0, pts.shape[1]), np.float32)
 
 def generateHexGridSamples(pts, n, innerOnly = False):
-    return np.dot(generateHexGridSampleWeights(n, innerOnly), pts) if n else pts
+    return np.dot(generateHexGridSampleWeights(n, innerOnly), pts)
+
+@memoize
+def generateTriGridTriangles(n, innerOnly = False):
+    if innerOnly and n <= 2:
+        return np.empty([0,3], np.int32)
+    tris = []
+    n += 1 - 3*innerOnly
+    s, o = 0, n+1
+    for r in range(n):
+        for t in range(s, s+n-r):
+            tris.append([t+r, t+r+1, t+r+o])
+            if r:
+                tris.append([t+r, t+r-o, t+r+1])
+        o -= 1
+        s += o
+    return np.int32(tris)
+
+@memoize
+def generateQuadGridQuads(n, innerOnly = False):
+    if innerOnly and n <= 1:
+        return np.empty([0,4], np.int32)
+    n += 1 - 2*innerOnly
+    m = n+1
+    vIdxs = lambda i: [i, i+1, i+1+m, i+m]
+    ijs = np.vstack([[i,j] for j in range(n) for i in range(n)])
+    return np.vstack([vIdxs(i+m*j) for i,j in ijs])
+
+@memoize
+def generateTetGridTetrahedra(n, innerOnly = False): # not a fully regular fractal subdivision
+    if innerOnly and n <= 3:
+        return np.empty([0,4], np.int32)
+    tets = []
+    n += 1 - 4*innerOnly
+    offs = np.cumsum(np.arange(n+2))[::-1]
+    s, o = 0, n+1
+    for z in range(n):
+        off = int(np.sum(offs[:z]))
+        for y in range(n-z):
+            for x in range(n-z-y):
+                shift = off + s + x
+                tets.append(np.int32([0, 1, o, offs[z]-y]) + shift)
+                if x: # weird inner octahedron as 4 tets
+                    a,b,c,d,e,f = np.int32([0, o-1, o, offs[z]-y-1, offs[z]-y, offs[z]-y-1+o-1]) + shift
+                    tets += [[a,c,b,f], [a,b,d,f], [a,e,c,f], [a,d,e,f]]
+            s += o
+            o -= 1
+        s, o = 0, n-z
+    return np.int32(tets)
+
+def generateHexGridHexahedra(n, innerOnly = False):
+    if innerOnly and n <= 1:
+        return np.empty([0,8], np.int32)
+    n += 1 - 2*innerOnly
+    m = n+1
+    vIdxs = lambda i: [i+1, i+m+1, i+m+m*m+1, i+1+m*m, i, i+m, i+m+m*m, i+m*m]
+    ijks = np.vstack([[i,j,k] for k in range(n) for j in range(n) for i in range(n)])
+    return np.vstack([vIdxs(i+m*j+m*m*k) for i,j,k in ijks])
+
+def generateTriGrid(n, in3D = False, innerOnly = False):
+    vs = generateTriGridSamples(generatePointsOnCircle(3, in3D), n, innerOnly)
+    ts = generateTriGridTriangles(n, innerOnly)
+    return vs, ts
+
+def generateQuadGrid(n, in3D = False, innerOnly = False):
+    vs = generateQuadGridSamples(pad2Dto3D(quadVerts) if in3D else quadVerts, n, innerOnly)
+    ts = generateQuadGridQuads(n, innerOnly)
+    return vs, ts
+
+def generateTetGrid(n, innerOnly = False):
+    vs, ts = generateIcoSphere(-1)
+    vs = generateTetGridSamples(vs, n, innerOnly)
+    ts = generateTetGridTetrahedra(n, innerOnly)
+    return vs, ts
+
+def generateHexGrid(n, innerOnly = False):
+    vs = generateHexGridSamples(cubeVerts, n, innerOnly)
+    ts = generateHexGridHexahedra(n, innerOnly)
+    return vs, ts
 
 def distPointToEdge(A, B, P, withClosest = False):
     AtoB = B - A
@@ -990,7 +1077,10 @@ def computePolygonCentroid2D(pts, withArea=False):
     rPts = np.roll(pts, 1, axis=0)
     w = pts[:,0] * rPts[:,1] - rPts[:,0] * pts[:,1]
     area = w.sum() / 2.0
-    centroid = np.sum((pts + rPts) * w.reshape(-1,1), axis=0) / (6 * area)
+    if area:
+        centroid = np.sum((pts + rPts) * w.reshape(-1,1), axis=0) / (6 * area)
+    else:
+        centroid = pts.mean(axis=0)
     return (centroid, np.abs(area)) if withArea else centroid
 
 def computeTriangleAngles(pts):
@@ -1348,20 +1438,32 @@ def computeJacobian(pts, scaled = False):
 
 def computeJacobians(ptss, scaled = False):
     if ptss.shape[2] == 2:
-        Js = np.float32([ptss[:,[3,1]] - ptss[:,0,None],
-                         ptss[:,[0,2]] - ptss[:,1,None],
-                         ptss[:,[1,3]] - ptss[:,2,None],
-                         ptss[:,[2,0]] - ptss[:,3,None]])
-        return simpleDets2x2(np.vstack(np.transpose(normVec(Js) if scaled else Js, axes=[1,0,2,3]))).reshape(-1,4)
-    Js = np.float32([ptss[:,[2,1,3]] - ptss[:,0,None],
-                     ptss[:,[4,5,0]] - ptss[:,1,None],
-                     ptss[:,[6,4,0]] - ptss[:,2,None],
-                     ptss[:,[0,5,6]] - ptss[:,3,None],
-                     ptss[:,[7,1,2]] - ptss[:,4,None],
-                     ptss[:,[1,7,3]] - ptss[:,5,None],
-                     ptss[:,[3,7,2]] - ptss[:,6,None],
-                     ptss[:,[5,4,6]] - ptss[:,7,None]])
-    return simpleDets3x3(np.vstack(np.transpose(normVec(Js) if scaled else Js, axes=[1,0,2,3]))).reshape(-1,8)
+        if ptss.shape[1] == 3: # tri
+            Js = np.float32([ptss[:,[2,1]] - ptss[:,0,None],
+                             ptss[:,[0,2]] - ptss[:,1,None],
+                             ptss[:,[1,0]] - ptss[:,2,None]])
+        else: # quad
+            Js = np.float32([ptss[:,[3,1]] - ptss[:,0,None],
+                             ptss[:,[0,2]] - ptss[:,1,None],
+                             ptss[:,[1,3]] - ptss[:,2,None],
+                             ptss[:,[2,0]] - ptss[:,3,None]])
+        return simpleDets2x2(np.vstack(np.transpose(normVec(Js) if scaled else Js, axes=[1,0,2,3]))).reshape(-1, ptss.shape[1])
+    else:
+        if ptss.shape[1] == 4: # tet
+            Js = np.float32([ptss[:,[2,3,1]] - ptss[:,0,None],
+                             ptss[:,[0,3,2]] - ptss[:,1,None],
+                             ptss[:,[0,1,3]] - ptss[:,2,None],
+                             ptss[:,[2,1,0]] - ptss[:,3,None]])
+        else: # hex (diagonal order)
+            Js = np.float32([ptss[:,[2,1,3]] - ptss[:,0,None],
+                             ptss[:,[4,5,0]] - ptss[:,1,None],
+                             ptss[:,[6,4,0]] - ptss[:,2,None],
+                             ptss[:,[0,5,6]] - ptss[:,3,None],
+                             ptss[:,[7,1,2]] - ptss[:,4,None],
+                             ptss[:,[1,7,3]] - ptss[:,5,None],
+                             ptss[:,[3,7,2]] - ptss[:,6,None],
+                             ptss[:,[5,4,6]] - ptss[:,7,None]])
+        return simpleDets3x3(np.vstack(np.transpose(normVec(Js) if scaled else Js, axes=[1,0,2,3]))).reshape(-1, ptss.shape[1])
 
 def vecsToOrthoMatrix(vs): # experimental
     if len(vs) > 3:
