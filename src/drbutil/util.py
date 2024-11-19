@@ -214,10 +214,7 @@ def matrixToQuaternion(m):
 
 # basic geometry and utility functions
 
-try:
-    from numpy.core.umath_tests import inner1d
-except ImportError:
-    def inner1d(u, v): return np.einsum('ij,ij->i', u, v)
+def inner1d(u, v): return (u * v).sum(axis=u.ndim-1)
 
 def normVec(v, withLen = False):
     if v.ndim == 1:
