@@ -12,7 +12,7 @@ def seed2rgb(seed): return hex2rgb(seed2hex(seed))
 def rgb2rgba(rgbCol, alpha=255): return padHor(rgbCol, alpha)
 
 def pad2Dto3D(pts, c=0):
-    return np.pad(pts, [[0,0], [0,1]], mode='constant', constant_values=c)
+    return np.pad(pts, [0,1] if pts.ndim == 1 else [[0,0], [0,1]], mode='constant', constant_values=c)
 
 def mat2Dto3D(M):
     return np.block([[M, np.zeros((2,1))],[np.zeros((1,2)), 1]])
@@ -540,6 +540,7 @@ def generateTetGridTetrahedra(n, innerOnly = False): # not a fully regular fract
         s, o = 0, n-z
     return np.int32(tets)
 
+@memoize
 def generateHexGridHexahedra(n, innerOnly = False):
     if innerOnly and n <= 1:
         return np.empty([0,8], np.int32)
@@ -570,6 +571,29 @@ def generateHexGrid(n, innerOnly = False):
     ts = generateHexGridHexahedra(n, innerOnly)
     return vs, ts
 
+def computePointInPolygonKernel(pts, improvementIters = -1):
+    n = len(pts)    
+    vTris = pad2Dto3D(np.roll(np.repeat(np.arange(n), 2),-1).reshape(-1,2), n)[:,::-1]
+    pPts = np.vstack([pts, pts.mean(axis=0)])
+    
+    ws = generateTriGridSampleWeights(5)
+    ws[:,1:] = ws[:,1:]**2
+    ws[:,0] = 1-ws[:,1:].sum(axis=1)
+
+    vTriz = np.vstack([vTris + [i,0,0] for i in range(len(ws)*len(vTris))])   
+    while True:
+        sPts = np.dot(ws, pPts[vTris]).reshape(-1,2)
+        pPtz = np.vstack([pts, sPts])
+        SJs = computeJacobians(pPtz[vTriz], True).min(axis=1).reshape(len(sPts), -1).min(axis=1)
+        cPt = sPts[np.argmax(SJs)]
+        if not improvementIters or norm(pPts[-1] - cPt) < eps:
+            if max(SJs) < 0:
+                warnings.warn('No kernel point found, polygon probably not star-shaped.')
+            break
+        improvementIters -= 1
+        pPts[-1] = cPt
+    return cPt
+
 def distPointToEdge(A, B, P, withClosest = False):
     AtoB = B - A
     AtoP = P - A
@@ -586,6 +610,13 @@ def distPointToEdge(A, B, P, withClosest = False):
         dist = norm(AtoP-np.dot(AtoP,d)*d)
         closest = A + np.dot(AtoP,d)*d
     return (dist, closest) if withClosest else dist
+
+def distsPointToEdges(ABs, P, withClosest = False):
+    As, Bs = ABs[:,0], ABs[:,1]
+    AsToBs = Bs - As
+    closests = As + AsToBs * np.clip(inner1d(P - As, AsToBs) / inner1d(AsToBs, AsToBs), 0, 1).reshape(-1,1)
+    dists = norm(closests - P)
+    return (dists, closests) if withClosest else dists
 
 def distPointsToEdge(A, B, Ps):
     AtoB = B - A
@@ -699,6 +730,13 @@ def pointInTriangles3D(ABCs, P, uvws = None, ns = None, assumeInPlane = False):
         if not m.any():
             return False
     return True
+
+def pointInPolygonKernel2D(pPts, p):
+    vTris = pad2Dto3D(np.roll(np.repeat(np.arange(len(pPts)), 2),-1).reshape(-1,2), len(pPts))
+    pts = np.vstack([pPts, p])
+    areas = computeTriangleAreas(pts[vTris])
+    signs = simpleSign(computeTriangleAreas(pts[vTris]), eps)
+    return np.all(signs == signs[0])
 
 def pointInPolygon2D(pPts, p):
     #es = pPts[np.roll(np.repeat(np.arange(4), 2), -1).reshape(-1,2)]
@@ -1127,30 +1165,21 @@ def computeTriangleGradients(pts):
     return np.dot(dirs, Mr2D(np.pi/2)) * lens.reshape(-1,1) / (2 * area)
 
 def computeBaryWeights(tVerts, pt):
-    if len(pt) == 2:
-        tVertss = np.repeat([tVerts],4,axis=0)
-        tVertss[[0,1,2],[0,1,2]] = pt
-        ws = computeTriangleAreas(tVertss)
-    else:
-        tVertss = np.repeat([tVerts],5,axis=0)
-        tVertss[[0,1,2,3],[0,1,2,3]] = pt
-        ws = computeTetraVolumes(tVertss)
-    return ws[:-1] / ws[-1]
+    nDim = len(pt)
+    tVertss = np.repeat([tVerts], nDim+1, axis=0)
+    rng = np.arange(nDim+1)
+    tVertss[rng, rng] = pt
+    ws = computeTriangleAreas(tVertss) if nDim == 2 else computeTetraVolumes(tVertss)
+    return ws / ws.sum()
 
 def computeBaryWeightss(tVertss, pt):
-    if len(pt) == 2:
-        tIdxs = np.arange(len(tVertss)*4).reshape(-1,4)[:,:-1].ravel()
-        vIdxs = np.arange(len(tVertss)*3) % 3
-        tVertss = np.repeat(tVertss, 4, axis=0)
-        tVertss[tIdxs, vIdxs] = pt
-        ws = computeTriangleAreas(tVertss).reshape(-1,4)
-    else:
-        tIdxs = np.arange(len(tVertss)*5).reshape(-1,5)[:,:-1].ravel()
-        vIdxs = np.arange(len(tVertss)*4) % 4
-        tVertss = np.repeat(tVertss, 5, axis=0)
-        tVertss[tIdxs, vIdxs] = pt
-        ws = computeTetraVolumes(tVertss).reshape(-1,5)
-    return ws[:,:-1] / ws[:,-1].reshape(-1,1)
+    nDim = len(pt)
+    tIdxs = np.arange(len(tVertss)*(nDim+1)).reshape(-1, nDim+1).ravel()
+    vIdxs = np.arange(len(tVertss)*(nDim+1)) % (nDim+1)
+    tVertss = np.repeat(tVertss, nDim+1, axis=0)
+    tVertss[tIdxs, vIdxs] = pt    
+    ws = (computeTriangleAreas(tVertss) if nDim == 2 else computeTetraVolumes(tVertss)).reshape(-1, nDim+1)
+    return ws / ws.sum(axis=1).reshape(-1,1)
 
 def computeGaussianCurvatures(vs, ts): # per vertex
     angles = computeTrianglesAngles(vs[ts])
@@ -1190,13 +1219,15 @@ def filterForManifoldness(vs, ts):
     mts = ts[tMsk]
     return filterForManifoldness(vs[np.unique(mts.ravel())], reIndexIndices(mts))
 
-def computeTetraVolume(pts):
+def computeTetraVolume(pts, signed = True):
     a, b, c = pts[1:] - pts[0]
-    return np.abs(np.dot(cross(a,b), c) / 6.0)
+    vol = np.dot(cross(a,b), c) / 6.0
+    return vol if signed else np.abs(vol)
 
-def computeTetraVolumes(ptss):
+def computeTetraVolumes(ptss, signed = True):
     abcs = ptss[:,1:] - ptss[:,0].reshape(-1,1,3)
-    return np.abs(inner1d(cross(abcs[:,0], abcs[:,1]), abcs[:,2]) / 6.0)
+    vols = inner1d(cross(abcs[:,0], abcs[:,1]), abcs[:,2]) / 6.0
+    return vols if signed else np.abs(vols)
 
 def computeTetraEdgeCenters(pts):
     return np.vstack([pts[0] + pts[1:], pts[1:] + np.roll(pts[1:], 1, axis=0)])/2
@@ -1216,12 +1247,12 @@ def computeTetraGradients(pts):
     dps = inner1d(triNormals, pts[tris].mean(axis=1) - pts)
     gradDirs = triNormals * -simpleSign(dps).reshape(-1,1)
     gradDirs *= computeTriangleAreas(pts[tris], False).reshape(-1,1)
-    return gradDirs / (3 * computeTetraVolume(pts))
+    return gradDirs / (3 * computeTetraVolume(pts, False))
 
 def computePolyVolume(pts, faces):
     tris = facesToTris(faces) # works with convex faces only
     center = pts[np.unique(tris)].mean(axis=0)
-    return np.sum([computeTetraVolume(np.vstack([center, pts[tri]])) for tri in tris])
+    return np.sum([computeTetraVolume(np.vstack([center, pts[tri]]), False) for tri in tris])
 
 def computeHexaVolume(pts):
     return computePolyVolume(pts[[0,2,6,3,1,4,7,5]], sixCubeFaces)
@@ -1241,7 +1272,7 @@ def computePolyhedronCentroid(vertices, faces, returnVolume=False):
     verts = np.vstack([vertices, [vertices[np.unique(tris)].mean(axis=0)]])
     tetPts = verts[tets]
     tetCentroids = tetPts.mean(axis=1)
-    tetVolumes = computeTetraVolumes(tetPts)
+    tetVolumes = computeTetraVolumes(tetPts, False)
     tetVolumesSum = tetVolumes.sum()
     polyCentroid = np.dot(tetVolumes/tetVolumesSum, tetCentroids) if tetVolumesSum > eps else tetCentroids.mean(axis=0)
     return (polyCentroid, tetVolumesSum) if returnVolume else polyCentroid
