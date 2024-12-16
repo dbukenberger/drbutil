@@ -59,15 +59,19 @@ try:
 except ImportError:
     mlabFound = False
 else:
-    def simpleWireframe(vs, fs, scals = None, withLabels = False):
+    def simpleWireframe(vs, fs = [], scals = None, withLabels = False):
         if vs.shape[1] < 3:
             vs = pad2Dto3D(vs)
         sf = norm(vs.max(axis=0)-vs.min(axis=0))/1000
         x,y,z = vs.T
-        mlab.triangular_mesh(x, y, z, toEdgeTris(facesToEdges(fs)), representation='mesh', tube_radius = sf)
+        s = scals if scals is not None else z*0
+        if len(fs):
+            mlab.triangular_mesh(x, y, z, toEdgeTris(facesToEdges(fs)), scalars = s, representation='mesh', tube_radius = sf)
+        elif scals is None:
+            scals = s
         if scals is not None:
-            u,v,w = (vs*0+0.1).T
-            qPlot = mlab.quiver3d(x, y, z, u, v, w, scalars = scals, mode = 'sphere', scale_factor = 0.1)
+            u,v,w = np.ones_like(vs).T
+            qPlot = mlab.quiver3d(x, y, z, u, v, w, scalars = scals, mode = 'sphere', scale_factor = sf*1.25)
             qPlot.glyph.color_mode = 'color_by_scalar'
             qPlot.glyph.glyph_source.glyph_position = 'center'
         if withLabels:
