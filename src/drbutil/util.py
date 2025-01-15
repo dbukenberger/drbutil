@@ -232,6 +232,8 @@ def norm(v): return np.sqrt(np.dot(v, v) if v.ndim == 1 else inner1d(v, v))
 
 def normZeroToOne(data): return (np.float32(data) - np.min(data))/(np.max(data) - np.min(data)) if len(data) else data
 
+def mnmx(v): return np.float32([v.min(axis = 0), v.max(axis=0)])
+
 def unique2d(a): return a[np.unique(a[:,0] + a[:,1]*1.0j,return_index=True)[1]]
 
 def orthoVec(v): return [1, -1] * (v[::-1] if v.ndim == 1 else v[:, ::-1])
@@ -1091,6 +1093,49 @@ def sortCounterClockwise(pts, c = None, returnOrder = False):
     angles = (np.arctan2(d[:,0], d[:,1]) + 2*np.pi) % (2*np.pi)
     order = np.argsort(angles)
     return order if returnOrder else pts[order]
+
+def flipTrianglesUniformly(ts, vs = None):
+    edgeHashToTriIdxs = {}
+    triEdgeHashs = cantorPiV(facesToEdges(ts, False)).reshape(-1,3)
+    for i, teHashs in enumerate(triEdgeHashs):
+        for teh in teHashs:
+            if teh not in edgeHashToTriIdxs:
+                edgeHashToTriIdxs[teh] = [i]
+            else:
+                edgeHashToTriIdxs[teh].append(i)
+
+    visited = np.zeros(len(ts), dtype=np.bool_)
+    visited[0] = True
+    queue = [0]
+    
+    while len(queue):
+        tIdx = queue.pop(0)
+        tri = ts[tIdx]
+        tehs = triEdgeHashs[tIdx]
+        for j, teh in enumerate(tehs):
+            nIdxs = edgeHashToTriIdxs[teh]
+
+            for nIdx in nIdxs:
+                if nIdx == tIdx or visited[nIdx]:
+                    continue
+                nTri = ts[nIdx]
+                if (tri[j], tri[(j+1)%3]) in [(nTri[0], nTri[1]), (nTri[1], nTri[2]), (nTri[2], nTri[0])]:
+                    ts[nIdx] = nTri[::-1]
+                    triEdgeHashs[nIdx] = triEdgeHashs[nIdx][[1,0,2]]
+
+                visited[nIdx] = True
+                queue.append(nIdx)
+
+        if not len(queue) and not visited.all():
+            queue.append(visited.argmin())         
+
+    if vs is not None:
+        vz = np.concatenate([vs, [vs.mean(axis=0)]])
+        tz = padHor(ts, len(vs))
+        if computeTetraVolumes(vz[tz]).sum() > 0:
+            ts = ts[:,::-1]            
+                
+    return ts
 
 def filterForUniqueEdges(edges):
     edges = np.int32(edges) if type(edges) == list else edges
