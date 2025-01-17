@@ -1375,6 +1375,13 @@ def limitedDissolve2D(verts):
             vIdxs.append(vIdx)
     return limitedDissolve2D(verts[vIdxs]) if len(vIdxs) < n else verts[vIdxs]
 
+def resamplePoly(verts, nTarget, isClosed = True):
+    vs = np.vstack([verts, verts[0]]) if isClosed else verts
+    csLength = np.pad(np.cumsum(norm(np.diff(vs, axis=0))), (1,0))
+    sDists = np.linspace(0, csLength[-1], nTarget + isClosed)
+    rvs = np.transpose([np.interp(sDists, csLength, v) for v in vs.T])
+    return rvs[:-1] if isClosed else rvs
+
 def interpolateBezierTriangle(points, normals):
     b = lambda i, j: (2*points[i] + points[j] - np.dot(points[j]-points[i], normals[i]) * normals[i])/3
     bs = np.array([points[0], points[1], points[2], b(0,1), b(1,0), b(1,2), b(2,1), b(2,0), b(0,2)])
