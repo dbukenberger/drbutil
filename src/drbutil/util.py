@@ -1148,7 +1148,7 @@ def filterForSingleEdges(edges):
     return np.array([edges[idx] for idx, count in zip(uIdxs, uCounts) if count == 1])
 
 def reIndexIndices(arr):
-    uIdxs = np.unique(flatten(arr))
+    uIdxs = np.unique(flatten(arr) if type(arr) == list else arr.ravel())
     reIdx = np.zeros(uIdxs.max()+1, np.int32)
     reIdx[uIdxs] = np.argsort(uIdxs)
     return [reIdx[ar] for ar in arr] if type(arr) == list else reIdx[arr]
