@@ -366,10 +366,9 @@ def Mr3D(alpha=0, beta=0, gamma=0):
     return np.dot(Rx, np.dot(Ry, Rz))
 
 def icdf(xs): # inverse cumulative distribution function
-    cs = xs.copy()
-    cs.sort()
-    pss = [np.abs(cs - x).argmin() for x in xs]
-    return np.float32(pss)/len(pss)
+    uxs, iIdxs, cts = np.unique(xs, return_inverse = True, return_counts = True)
+    ccts = np.cumsum(cts)-cts[0]
+    return np.clip(ccts[iIdxs] / (len(xs) - cts[0] - cts[-1]), 0, 1)
 
 def generateGridPoints(n, d, e=1):
     ptsGrid = np.linspace(-e, e, n, endpoint=False) + e / n
