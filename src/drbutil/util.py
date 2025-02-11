@@ -88,7 +88,7 @@ def hexaToFaces(hexa):
 def hexasToFaces(hexas):
     return np.vstack(hexas[...,sixCubeFaces])
 
-def edgesToPath(edgesIn, withClosedFlag = False):
+def edgesToPath(edgesIn, withClosedFlag = False, returnPartial = False):
     edges = copy.deepcopy(edgesIn) if type(edgesIn) == list else edgesIn.tolist()
     path = edges.pop(0)
     iters = 0
@@ -110,43 +110,54 @@ def edgesToPath(edgesIn, withClosedFlag = False):
             edges.append(edge)
             iters += 1
         if len(edges) and iters > len(edges):
-            break
+            if returnPartial:
+                break
+            else:
+                return
     if path[0] == path[-1]:
         return (path[:-1], True) if withClosedFlag else path[:-1]
     else:
         return (path, False) if withClosedFlag else path
 
-def edgesToPaths(edgesIn, withClosedFlag = False):
-    edges = copy.deepcopy(edgesIn) if type(edgesIn) == list else edgesIn.tolist()
-    path = edges.pop(0)
-    paths = []
-    closed = []
-    iters = 0
-    while len(edges):
-        edge = edges.pop(0)
-        if path[0] == edge[0]:
-            path.insert(0, edge[1])
-            iters = 0
-        elif path[-1] == edge[0]:
-            path.append(edge[1])
-            iters = 0
-        elif path[0] == edge[1]:
-            path.insert(0, edge[0])
-            iters = 0
-        elif path[-1] == edge[1]:
-            path.append(edge[0])
-            iters = 0
-        else:
-            edges.append(edge)
-            iters += 1
-        if len(edges) and iters >= len(edges):
-            iters = 0
-            closed.append(path[0] == path[-1])
-            paths.append(copy.deepcopy(path[:-1] if closed[-1] else path))
-            path = edges.pop(0)
-    closed.append(path[0] == path[-1])
-    paths.append(path[:-1] if closed[-1] else path)
-    return (paths, closed) if withClosedFlag else paths
+def edgesToPaths(edges, withClosedFlag = False):
+    vIdxs = np.unique(flatten(edges) if type(edges) == list else edges.ravel())
+    adj = {vIdx: [] for vIdx in vIdxs}
+    for vIdx, vJdx in edges:
+        adj[vIdx].append(vJdx)
+        adj[vJdx].append(vIdx)
+
+    if max([len(adj[v]) for v in vIdxs]) > 2:
+        warnings.warn('Only vetex valcences <= 2 are supported.')
+        return
+
+    visited = set()
+    paths, closed = [], []
+    for vIdx in vIdxs:
+        if vIdx in visited:
+            continue
+
+        nIdxs = adj[vIdx]
+        path = [nIdxs[0], vIdx, nIdxs[1]] if len(nIdxs) == 2 else [nIdxs[0], vIdx]
+        isClosed = False
+        endsReached = [True, True]
+        while any(endsReached) and not isClosed:
+            for idxs in [[0,1,-1], [-1,-2,0]]:
+                if endsReached[idxs[0]]:
+                    nIdxs = adj[path[idxs[0]]]
+                    if len(nIdxs) == 1 and nIdxs[0] == path[idxs[1]]:
+                        endsReached[idxs[0]] = False
+                    else:
+                        vJdx = nIdxs[0] if nIdxs[0] != path[idxs[1]] else nIdxs[1]
+                        if vJdx == path[idxs[2]]:
+                            isClosed = True
+                            break
+                        path = path + [vJdx] if idxs[0] < 0 else [vJdx] + path
+
+        paths.append(path)
+        closed.append(isClosed)
+        visited.update(path)
+        
+    return (paths, closed) if withClosedFlags else paths
 
 def pathToEdges(path, closed = True):
     es = np.transpose([path, np.roll(path, -1)])
@@ -608,8 +619,9 @@ def distPointToEdge(A, B, P, withClosest = False):
         closest = B
     else:
         d = normVec(AtoB)
-        dist = norm(AtoP-np.dot(AtoP,d)*d)
-        closest = A + np.dot(AtoP,d)*d
+        AtoC = np.dot(AtoP, d) * d
+        dist = norm(AtoP-AtoC)
+        closest = A + AtoC
     return (dist, closest) if withClosest else dist
 
 def distsPointToEdges(ABs, P, withClosest = False):
