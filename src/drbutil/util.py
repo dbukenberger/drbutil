@@ -157,7 +157,7 @@ def edgesToPaths(edges, withClosedFlag = False):
         closed.append(isClosed)
         visited.update(path)
         
-    return (paths, closed) if withClosedFlags else paths
+    return (paths, closed) if withClosedFlag else paths
 
 def pathToEdges(path, closed = True):
     es = np.transpose([path, np.roll(path, -1)])
