@@ -1,5 +1,4 @@
 import os
-import numpy as np
 from .util import *
 
 def loadObjFile(fileName, extraTags = []):

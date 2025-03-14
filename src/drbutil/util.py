@@ -1,7 +1,7 @@
 import hashlib
 import copy
-import numpy as np
-
+from . import np
+from . import scipyFound, scipy, spla
 
 # converting helpers
 
@@ -1275,6 +1275,71 @@ def filterForManifoldness(vs, ts):
     mts = ts[tMsk]
     return filterForManifoldness(vs[np.unique(mts.ravel())], reIndexIndices(mts))
 
+def computeSystemMatrix(vs, ts, useCotan = True):
+    idxs, jdxs = ts[:,[1,2,0]].T.ravel(), ts[:,[2,0,1]].T.ravel()
+    if useCotan:
+        eVecs = vs[ts] - vs[ts[:,[2,0,1]]]
+        e120 = np.vstack([eVecs[:,i,:] for i in range(3)])
+        e201 = np.vstack([eVecs[:,(i+1)%3,:] for i in range(3)])
+        vals = inner1d(-e120, e201) / norm(cross(-e120, e201))
+    else:
+        vals = np.ones(len(ts)*3)
+
+    if scipyFound:
+        S = scipy.sparse.coo_matrix((vals/2, (idxs, jdxs)), shape=(len(vs), len(vs)))
+        S += S.T
+        return -(scipy.sparse.diags(np.array(S.sum(axis=1)).flatten()) - S)
+    else:
+        S = np.zeros((len(vs), len(vs)))
+        S[idxs,jdxs] = vals/2
+        S += S.T
+        return -(np.diag(S.sum(axis=1)) - S)
+
+def computeMassMatrix(vs, ts):
+    eVecs = vs[ts[:,[1,2,0]]] - vs[ts[:,[2,0,1]]]
+    eLenSqs = inner1d(eVecs, eVecs)
+    eLens = np.sqrt(eLenSqs)
+    s = eLens.sum(axis=1)/2
+    Atri = np.sqrt(s * (s[:,None]-eLens).prod(axis=-1))
+
+    a2, b2, c2 = eLenSqs, np.roll(eLenSqs, -1, axis=1), np.roll(eLenSqs, -2, axis=1)
+    cosAngles = (b2 + c2 - a2) / (2 * np.sqrt(b2 * c2))
+    angles = np.arccos(np.clip(cosAngles, -1, 1))
+
+    lnCt = eLenSqs / np.tan(np.maximum(angles, eps))
+    Avor = (lnCt.sum(axis=1)[:,None] - lnCt)/8
+
+    obtuseVertMsk = angles > np.pi/2
+    obtuseTriMsk = obtuseVertMsk.any(axis=1)
+    Asafe = Atri[:,None] / (2 * (2-obtuseVertMsk))
+
+    Amix = np.where(obtuseTriMsk[:,None], Asafe, Avor)
+
+    Av = np.zeros(len(vs))
+    [np.add.at(Av, ts[:,i], Amix[:,i]) for i in range(3)]
+    return scipy.sparse.diags(Av) if scipyFound else np.diag(Av)
+
+def smoothen(vs, ts, nIters = 10, t = None, useCotan = True, volumeHack = True):
+    if t is None:
+        es = facesToEdges(ts)
+        t = norm(vs[es[:,0]] - vs[es[:,1]]).mean() ** 2
+        #t = norm(np.dot([-1,1], mnmx(vs)))**2 / len(vs)
+
+    if volumeHack:
+        volInit = computePolyVolume(vs, ts)
+        c = vs.mean(axis=0)
+
+    S, M = computeSystemMatrix(vs, ts, useCotan), computeMassMatrix(vs, ts)
+    MtS = M - t * S
+    for i in range(nIters):
+        vs = spla.spsolve(MtS, M.dot(vs)) if scipyFound else np.linalg.solve(MtS, M.dot(vs))
+
+    if volumeHack:
+        volNew = computePolyVolume(vs, ts)
+        vs = c + (vs - c) * (volInit/volNew)**(1/3)
+
+    return vs
+
 def computeTetraVolume(pts, signed = True):
     a, b, c = pts[1:] - pts[0]
     vol = np.dot(cross(a,b), c) / 6.0
@@ -1305,10 +1370,10 @@ def computeTetraGradients(pts):
     gradDirs *= computeTriangleAreas(pts[tris], False).reshape(-1,1)
     return gradDirs / (3 * computeTetraVolume(pts, False))
 
-def computePolyVolume(pts, faces):
-    tris = facesToTris(faces) # works with convex faces only
-    center = pts[np.unique(tris)].mean(axis=0)
-    return np.sum([computeTetraVolume(np.vstack([center, pts[tri]]), False) for tri in tris])
+def computePolyVolume(pts, faces): # only safe for convex shapes/faces
+    tets = padHor(facesToTris(faces)[:,::-1], len(pts))
+    vs = np.vstack([pts, pts.mean(axis=0)])
+    return computeTetraVolumes(vs[tets], True).sum()
 
 def computeHexaVolume(pts):
     return computePolyVolume(pts[[0,2,6,3,1,4,7,5]], sixCubeFaces)

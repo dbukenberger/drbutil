@@ -36,17 +36,16 @@ for pDir in [builtins.datDir, builtins.logDir, builtins.resDir, builtins.tmpDir]
 try:
     import matplotlib.pyplot as plt
     from matplotlib.widgets import Slider, Button, RadioButtons
-except ImportError:
-    mplFound = False
-else:
+    mplFound = True
+
     def simplePlot(xs, ys = None, labels = None):
         for i, x in enumerate(xs):
             plt.plot(np.arange(len(x)) if ys is None else ys[i], x)
         if labels is not None:
             plt.legend(labels)
         plt.show()
-
-    mplFound = True
+except ImportError:
+    mplFound = False
 
 
 # for visualizing 3D results
@@ -56,9 +55,8 @@ try:
     from traitsui.api import View, Item, Group, HSplit
     from mayavi.core.api import PipelineBase
     from mayavi.core.ui.api import MayaviScene, SceneEditor, MlabSceneModel
-except ImportError:
-    mlabFound = False
-else:
+    mlabFound = True
+    
     def simpleWireframe(vs, fs = [], scals = None, withLabels = False):
         if vs.shape[1] < 3:
             vs = pad2Dto3D(vs)
@@ -77,8 +75,8 @@ else:
         if withLabels:
             for vIdx, v in enumerate(vs):
                 mlab.text3d(v[0], v[1], v[2], str(vIdx), scale = sf * 10)
-    
-    mlabFound = True
+except ImportError:   
+    mlabFound = False
 
 
 # show progress in shell
@@ -99,6 +97,16 @@ except:
 
     def tqdm(x, **kwargs):
         return tqdmDummy() if x is None else x
+
+
+# recommended for solver tasks on sparse matrices
+try:
+    import scipy
+    import scipy.sparse.linalg as spla
+    scipyFound = True
+except ImportError:
+    scipyFound = False
+    scipy, spla = None, None
 
 
 # simple logger class
