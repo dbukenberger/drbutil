@@ -432,6 +432,32 @@ def generateIcoSphere(nSubdiv = 0, likeBlender = False):
 
     return verts, tris
 
+def generateCylinder(vBot, vTop, r = 0, n = 12, m = 0, triangulate = True):
+    cDir, h = normVec(vTop - vBot, True)
+    r = h/2 if not r else r
+    rVerts = rotateAsToB(generatePointsOnCircle(n, True) * r, cDir)
+    
+    baseEdges = np.transpose([np.arange(n), np.roll(np.arange(n),-1)])
+    rFaces = np.hstack([baseEdges, baseEdges[:,::-1] + n])
+    if triangulate:
+        rFaces = facesToTris(rFaces)
+
+    numSegs = max(1, int(h/r + 0.5)) if m < 0 else m+1
+    alphas = np.linspace(0, 1, numSegs+1)[:,None]
+    cPts = (1-alphas) * vBot + alphas * vTop
+    cVerts = np.vstack(rVerts + cPts[:,None])
+    cFaces = np.vstack([i*n + rFaces for i in range(numSegs)]).tolist()
+    if triangulate:
+        cVerts = np.vstack([cVerts, [vBot, vTop]])
+        bCap = pad2Dto3D(baseEdges[:,::-1], n * (numSegs+1))
+        tCap = pad2Dto3D(baseEdges + n * numSegs, n * (numSegs+1) + 1)
+        cFaces = np.vstack([cFaces, bCap, tCap])
+    else:
+        cFaces += np.abs([[-n+1], [n*numSegs]] + np.arange(n)).tolist()
+        cFaces = list(map(np.int32, cFaces))
+
+    return cVerts, cFaces
+
 def generateSamples(vs, elems, n = None, weights = None):
     nDim = elems.shape[1]
     if n is None:
