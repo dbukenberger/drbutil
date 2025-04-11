@@ -75,7 +75,30 @@ try:
         if withLabels:
             for vIdx, v in enumerate(vs):
                 mlab.text3d(v[0], v[1], v[2], str(vIdx), scale = sf * 10)
-except ImportError:   
+
+    def simpleTriSurface(vs, ts, scals = None, drawEdges = False, withNormals = False, withLabels = False):
+        if vs.shape[1] < 3:
+            vs = pad2Dto3D(vs)
+        sf = norm(vs.max(axis=0)-vs.min(axis=0))/1000
+        x,y,z = vs.T
+        s = scals if scals is not None else z*0
+        mPlot = mlab.triangular_mesh(x, y, z, ts, scalars = s)
+        mPlot.parent.parent.filter.feature_angle = 0
+        mPlot.actor.property.edge_visibility = drawEdges
+        
+        if withNormals:
+            x,y,z = vs[ts].mean(axis=1).T
+            u,v,w = computeTriangleNormals(vs[ts]).T
+            nPlot = mlab.quiver3d(x, y, z, u, v, w, scalars = computeTriangleAreas(vs[ts], False), scale_factor = 10*sf)
+            nPlot.glyph.color_mode = 'color_by_scalar'
+            nPlot.glyph.glyph_source.glyph_source.glyph_type = 'dash'
+            #nPlot.glyph.glyph_source.glyph_position = 'center'            
+
+        if withLabels:
+            for tIdx, tc in enumerate(vs[ts].mean(axis=0)):
+                mlab.text3d(tc[0], tc[1], tc[2], str(tIdx), scale = sf * 10)
+
+except ImportError:
     mlabFound = False
 
 

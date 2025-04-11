@@ -458,6 +458,42 @@ def generateCylinder(vBot, vTop, r = 0, n = 12, m = 0, triangulate = True):
 
     return cVerts, cFaces
 
+def generateUvSphere(n = 32, m = 16, triangulate = True):
+    rVerts = generatePointsOnCircle(n, True)
+    rng = np.linspace(-np.pi/2, np.pi/2, m+1)[1:-1]
+    h, s = np.sin(rng), np.cos(rng)
+    vs = np.tile(rVerts, (m-1, 1)) * np.repeat(s, n)[:,None]
+    vs[:,-1] = np.repeat(h, n)
+    cVerts = np.vstack([[[0,0,-1,]], vs, [[0,0,1]]])
+
+    baseEdges = np.transpose([np.arange(n), np.roll(np.arange(n),-1)]) + 1
+    rFaces = np.hstack([baseEdges, baseEdges[:,::-1] + n])
+    bCap = pad2Dto3D(baseEdges[:,::-1], 0)
+    tCap = pad2Dto3D(baseEdges + n * (m-2), n * (m-1) + 1)
+    if triangulate:
+        rFaces = facesToTris(rFaces)
+        cFaces = np.vstack([i*n + rFaces for i in range(m-2)])
+        cFaces = np.vstack([bCap, cFaces, tCap])
+    else:
+        cFaces = np.vstack([i*n + rFaces for i in range(m-2)]).tolist()
+        cFaces = list(map(np.int32, bCap.tolist() + cFaces + tCap.tolist()))
+    
+    return cVerts, cFaces
+
+def generateCapsule(vBot, vTop, r, n = 12, mCyl = 0, mCap = 8, triangulate = True):
+    cylVs, cylFs = generateCylinder(vBot, vTop, r, n, mCyl, triangulate = False)
+    uvsVs, uvsFs = generateUvSphere(n, 2*((mCap+1)//2), triangulate = False)
+    cDir = normVec(vTop - vBot)
+    uvsVs = rotateAsToB(uvsVs * r, cDir)
+    if (cDir + [0,0,1]).sum() == 0:
+        uvsVs[:,-1] *= -1
+
+    cVerts = np.vstack([uvsVs[:n*(mCap//2)+1] + vBot, cylVs, uvsVs[n*(mCap//2)+1:] + vTop])
+    cFaces = uvsFs[:len(uvsFs)//2] + (np.int32(cylFs[:-2]) + n*(mCap//2)+1).tolist() + [f + len(cylVs) for f in uvsFs[len(uvsFs)//2:]]
+    cFaces = facesToTris(cFaces) if triangulate else list(map(np.int32, cFaces))
+
+    return cVerts, cFaces
+
 def generateSamples(vs, elems, n = None, weights = None):
     nDim = elems.shape[1]
     if n is None:
@@ -854,7 +890,7 @@ def intersectTrianglesWithRay(ABCs, O, D):
     if not uMsk.any():
         return []
     qs = cross(ss[uMsk], e1s[zMsk][uMsk])
-    vs = inner1d(D, qs) * fs[uMsk]
+    vs = inner1d(np.float32([D]) if D.ndim == 1 else D, qs) * fs[uMsk]
 
     vMsk = np.bitwise_and(vs >= 0, (us[uMsk] + vs) <= 1)
     if not vMsk.any():
