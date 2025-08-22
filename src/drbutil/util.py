@@ -1,5 +1,6 @@
 import hashlib
 import copy
+import warnings
 from . import np
 from . import scipyFound, scipy, spla
 
@@ -12,7 +13,7 @@ def seed2rgb(seed): return hex2rgb(seed2hex(seed))
 def rgb2rgba(rgbCol, alpha=255): return padHor(rgbCol, alpha)
 
 def pad2Dto3D(pts, c=0):
-    return np.pad(pts, [0,1] if pts.ndim == 1 else [[0,0], [0,1]], mode='constant', constant_values=c)
+    return np.pad(pts, [[0,0]] * (pts.ndim-1) + [[0,1]], mode='constant', constant_values=c)
 
 def mat2Dto3D(M):
     return np.block([[M, np.zeros((2,1))],[np.zeros((1,2)), 1]])
@@ -241,7 +242,11 @@ def normVec(v, withLen = False):
 
 def norm(v): return np.sqrt(np.dot(v, v) if v.ndim == 1 else inner1d(v, v))
 
-def normZeroToOne(data): return (np.float32(data) - np.min(data))/(np.max(data) - np.min(data)) if len(data) else data
+def normZeroToOne(data, axis = None):
+    if axis is not None and data.ndim > 1:
+        return (np.float32(data) - np.min(data, axis=axis))/(np.max(data, axis=axis) - np.min(data, axis=axis))
+    else:
+        return (np.float32(data) - np.min(data))/(np.max(data) - np.min(data)) if len(data) else data
 
 def mnmx(v): return np.float32([v.min(axis = 0), v.max(axis=0)])
 
@@ -380,6 +385,24 @@ def icdf(xs): # inverse cumulative distribution function
     uxs, iIdxs, cts = np.unique(xs, return_inverse = True, return_counts = True)
     ccts = np.cumsum(cts)-cts[0]
     return np.clip(ccts[iIdxs] / (len(xs) - cts[0] - cts[-1]), 0, 1)
+
+def factorial(n):
+    return np.prod(np.arange(n)+1)
+
+def binomialCoefficient(i, n):
+    return factorial(n) / (factorial(i) * factorial(n-i))
+
+def Bernstein(t, i, n):
+    return binomialCoefficient(i, n) * t**i * (1-t)**(n-i)
+
+def generateKernelBC1D(s = 3):
+    ws = np.float32([bc(i, s-1) for i in range(s)])
+    return ws/ws.sum()
+
+def generateKernelGauss1D(n, sigma = 1):
+    xs = np.arange(n) - (n-1)/2
+    ws = np.exp(-xs**2/(2*sigma**2))
+    return ws / ws.sum()
 
 def generateGridPoints(n, d, e=1):
     ptsGrid = np.linspace(-e, e, n, endpoint=False) + e / n
@@ -661,7 +684,7 @@ def computePointInPolygonKernel(pts, improvementIters = -1):
         SJs = computeJacobians(pPtz[vTriz], True).min(axis=1).reshape(len(sPts), -1).min(axis=1)
         cPt = sPts[np.argmax(SJs)]
         if not improvementIters or norm(pPts[-1] - cPt) < eps:
-            if max(SJs) < 0:
+            if max(SJs)-min(SJs) > 1:
                 warnings.warn('No kernel point found, polygon probably not star-shaped.')
             break
         improvementIters -= 1
@@ -1236,16 +1259,23 @@ def computePolygonCentroid2D(pts, withArea=False):
         centroid = pts.mean(axis=0)
     return (centroid, np.abs(area)) if withArea else centroid
 
+def computePolygonAngles(pts):
+    ds = normVec(np.roll(pts, -1, axis=0) - pts)
+    return np.arccos(np.clip(inner1d(ds, -np.roll(ds, 1, axis=0)), -1, 1))
+
+def computePolygonArea(pts, c = None, signed = True):
+    ts = pad2Dto3D(pathToEdges(np.arange(len(pts))), len(pts))
+    if c is None:
+        c = computePointInPolygonKernel(pts)
+    vs = np.vstack([pts, c])
+    return computeTriangleAreas(vs[ts], signed).sum()
+
 def computeTriangleAngles(pts):
     return computePolygonAngles(pts)
 
 def computeTrianglesAngles(ptss):
     ds = normVec(np.roll(ptss, -1, axis=1) - ptss)
     return np.arccos(np.clip(inner1d(np.vstack(ds), np.vstack(-np.roll(ds, 1, axis=1))), -1, 1)).reshape(-1,3)
-
-def computePolygonAngles(pts):
-    ds = normVec(np.roll(pts, -1, axis=0) - pts)
-    return np.arccos(np.clip(inner1d(ds, -np.roll(ds, 1, axis=0)), -1, 1))
 
 def computeTriangleNormal(pts, normed = True):
     AB, AC = pts[1:] - pts[0] if pts.ndim < 3 else (pts[:,1:] - pts[:,0].reshape(-1,1,3)).T
@@ -1402,6 +1432,25 @@ def smoothen(vs, ts, nIters = 10, t = None, useCotan = True, volumeHack = True):
 
     return vs
 
+def smoothenPoly(vs, kernel = 3, nIters = 1, isClosed = False, volumeHack = True):
+    if volumeHack:
+        c = vs.mean(axis=0)
+        volInit = computePolygonArea(vs, c, False)
+        
+    k = generateKernelGauss1D(kernel + (1-kernel%2)) if np.isscalar(kernel) else kernel
+
+    pMode = 'wrap' if isClosed else 'edge'
+    pSize = [[len(k)//2]*2,[0,0]]
+    for i in range(nIters):
+        pVs = np.pad(vs, pSize, mode = pMode)
+        vs = np.transpose([np.convolve(pVs[:,d], k, mode='valid') for d in range(vs.shape[1])])            
+
+    if volumeHack:
+        volNew = computePolygonArea(vs, c, False)
+        vs = c + (vs - c) * (volInit / volNew) ** 0.5
+
+    return vs
+
 def computeTetraVolume(pts, signed = True):
     a, b, c = pts[1:] - pts[0]
     vol = np.dot(cross(a,b), c) / 6.0
@@ -1512,6 +1561,10 @@ def limitedDissolve2D(verts):
         if np.abs(np.dot(vecs[0], vecs[1])) < (1 - eps):
             vIdxs.append(vIdx)
     return limitedDissolve2D(verts[vIdxs]) if len(vIdxs) < n else verts[vIdxs]
+
+def computeArcLength(verts, isClosed = False):
+    vs = np.vstack([verts, verts[0]]) if isClosed else verts
+    return norm(np.diff(vs, axis=0)).sum()
 
 def resamplePoly(verts, nTarget, isClosed = True):
     vs = np.vstack([verts, verts[0]]) if isClosed else verts

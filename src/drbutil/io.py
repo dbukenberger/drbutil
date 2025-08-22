@@ -201,9 +201,12 @@ def writeOvmFile(filePath, vertices, faces, cells):
 
 def writeTxtFile(filePath, data):
     with open(filePath, 'w') as fh:
-        for line in data:
-            fmt = '%f' if type(line[0]) == float else '%d'
-            fh.write(' '.join([fmt%e for e in line]) + '\n')
+        if type(data) == str:
+            fh.write(data)
+        else:
+            for line in data:
+                fmt = '%f' if type(line[0]) == float else '%d'
+                fh.write(' '.join([fmt%e for e in line]) + '\n')
 
 def writePlyFile(filePath, vertices, faces = [], edges = [], verticesColors = [], verticesNormals = [], withAln = False, cmnt = None):
     with open(filePath, 'w') as fh:

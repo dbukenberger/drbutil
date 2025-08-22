@@ -98,6 +98,34 @@ try:
             for tIdx, tc in enumerate(vs[ts].mean(axis=0)):
                 mlab.text3d(tc[0], tc[1], tc[2], str(tIdx), scale = sf * 10)
 
+    def simpleField(vs, dirs, scals = None, normalized = False, centered = False):
+        if vs.shape[1] < 3:
+            vs = pad2Dto3D(vs)
+        sf = norm(vs.max(axis=0)-vs.min(axis=0))/1000
+        x,y,z = vs.T
+        u,v,w = np.ones_like(vs).T
+        scals = z*0 if scals is None else scals
+        qPlot = mlab.quiver3d(x, y, z, u, v, w, scalars = scals, mode = 'sphere', scale_factor = sf*1.25)
+        qPlot.glyph.color_mode = 'color_by_scalar'
+        qPlot.glyph.glyph_source.glyph_position = 'center'
+
+        if dirs.shape[-1] < 3:
+            dirs = pad2Dto3D(dirs)
+
+        if dirs.ndim == 3:
+            n = dirs.shape[1]
+            x,y,z = np.repeat(vs, n, axis=0).T
+            scals = (n-1)-np.arange(len(dirs)*n)%n
+            dirs = np.vstack(dirs)
+        u,v,w = normVec(dirs).T if normalized else dirs.T
+
+        fPlot = mlab.quiver3d(x, y, z, u, v, w, scalars = scals, scale_factor = 10*sf)
+        fPlot.glyph.color_mode = 'color_by_scalar'
+        fPlot.glyph.glyph_source.glyph_source.glyph_type = 'dash'
+        fPlot.glyph.glyph_source.glyph_position = 'center' if centered else 'tail'
+
+
+
 except ImportError:
     mlabFound = False
 
