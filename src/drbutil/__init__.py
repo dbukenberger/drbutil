@@ -98,6 +98,14 @@ try:
             for tIdx, tc in enumerate(vs[ts].mean(axis=0)):
                 mlab.text3d(tc[0], tc[1], tc[2], str(tIdx), scale = sf * 10)
 
+        def pickerCallback(pickerObj):
+            if pickerObj.actor in mPlot.actor.actors:
+                vIdx = pickerObj.point_id
+                if vIdx >=0 :
+                    v = vs[vIdx]
+                    print("vIdx: % 4d, pos:"%vIdx, (", ".join(["%0.6f"]*len(v)))%tuple(v))
+        mlab.gcf().on_mouse_pick(pickerCallback)
+
     def simpleField(vs, dirs, scals = None, normalized = False, centered = False):
         if vs.shape[1] < 3:
             vs = pad2Dto3D(vs)
