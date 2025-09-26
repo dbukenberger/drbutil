@@ -3,6 +3,7 @@ import copy
 import warnings
 from . import np
 from . import scipyFound, scipy, spla
+from . import pypardisoFound, pypardiso
 
 # converting helpers
 
@@ -70,18 +71,19 @@ def tetsToEdges(tets):
     es.sort(axis=1)
     return unique2d(es)
 
-tdxs = np.ravel(np.int32([[2,1,0], [3,0,1], [3,1,2], [3,2,0]]))
+tdxs = np.int32([[2,1,0], [3,0,1], [3,1,2], [3,2,0]])
 def tetraToFaces(tetra):
-    return tetra[tdxs].reshape(-1,3)
-    #return np.vstack([np.roll(tetra, i)[:-1] for i in range(4)])
+    return tetra[tdxs]
 
 def tetrasToFaces(tetras):
-    tsdxs = np.tile(tdxs, len(tetras)) + np.repeat(np.arange(len(tetras)), 12) * 4
-    return np.ravel(tetras)[tsdxs].reshape(-1,3)
-    #return np.hstack([np.roll(tetras, i, axis=1)[:,:-1] for i in range(4)]).reshape(-1,3)
+    return tetras[:,tdxs].reshape(-1,3)
 
+hdxs = np.int32([[5,0,1,3],[5,1,2,3],[5,0,3,4],[6,2,3,5],[7,3,4,5],[7,3,5,6]])
 def hexaToTetras(hexa):
-    return np.vstack([hexa[idxs] for idxs in [[0,1,3,5],[1,2,3,5],[0,3,4,5],[2,3,5,6],[3,4,5,7],[3,5,6,7]]])
+    return hexa[hdxs]
+
+def hexasToTetras(hexas):
+    return hexas[:,hdxs].reshape(-1,4)
 
 def hexaToFaces(hexa):
     return hexa[sixCubeFaces]
@@ -1411,7 +1413,7 @@ def computeMassMatrix(vs, ts):
     [np.add.at(Av, ts[:,i], Amix[:,i]) for i in range(3)]
     return scipy.sparse.diags(Av) if scipyFound else np.diag(Av)
 
-def smoothen(vs, ts, nIters = 10, t = None, useCotan = True, volumeHack = True):
+def smoothen(vs, ts, nIters = 10, t = None, useCotan = True, volumeHack = True, mpSolve = True):
     if t is None:
         es = facesToEdges(ts)
         t = norm(vs[es[:,0]] - vs[es[:,1]]).mean() ** 2
@@ -1421,10 +1423,12 @@ def smoothen(vs, ts, nIters = 10, t = None, useCotan = True, volumeHack = True):
         volInit = computePolyVolume(vs, ts)
         c = vs.mean(axis=0)
 
+    solve = pypardiso.spsolve if (pypardisoFound and mpSolve) else (spla.spsolve if scipyFound else np.linalg.solve)
+
     S, M = computeSystemMatrix(vs, ts, useCotan), computeMassMatrix(vs, ts)
     MtS = M - t * S
     for i in range(nIters):
-        vs = spla.spsolve(MtS, M.dot(vs)) if scipyFound else np.linalg.solve(MtS, M.dot(vs))
+        vs = solve(MtS, M.dot(vs))
 
     if volumeHack:
         volNew = computePolyVolume(vs, ts)

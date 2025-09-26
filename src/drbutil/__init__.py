@@ -133,7 +133,6 @@ try:
         fPlot.glyph.glyph_source.glyph_position = 'center' if centered else 'tail'
 
 
-
 except ImportError:
     mlabFound = False
 
@@ -166,6 +165,15 @@ try:
 except ImportError:
     scipyFound = False
     scipy, spla = None, None
+
+
+# fast sparse factorization and solving
+try:
+    import pypardiso
+    pypardisoFound = True
+except ImportError:
+    pypardisoFound = False
+    pypardiso = None
 
 
 # simple logger class
