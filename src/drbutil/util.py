@@ -47,6 +47,30 @@ def facesToTris(faces):
     tris = np.hstack([np.repeat(faces[:,0].reshape(-1,1), faces.shape[1] - 2, axis=0), np.repeat(faces[:,1:],2, axis=1)[:,1:-1].reshape(-1,2)])
     return tris[np.bitwise_and(tris[:,1]>=0 , tris[:,2]>=0)]
 
+def quadrangulate(vs, fs, smooth = False):
+    fVal = -1 if type(fs) == list else fs.shape[1]
+    if fVal < 0 and type(fs[0]) == list:
+        fs = [np.int32(f) for f in fs]
+
+    es = facesToEdges(fs)
+    eHashIdxs = {eHash:eIdx for eIdx, eHash in enumerate(cantorPiV(es))}
+    if smooth and fVal == 3:
+        ns = computeVertexNormals(vs, fs)
+        eCenters = np.float32([interpolatePnEdge(vs[e], ns[e])[0] for e in es])
+        fCenters = np.float32([interpolatePnTriangle(vs[f], ns[f])[0] for f in fs])
+    else:
+        eCenters = vs[es].mean(axis=1)
+        fCenters = np.float32([vs[f].mean(axis=0) for f in fs]) if fVal < 0 else vs[fs].mean(axis=1)
+
+    qs = []
+    nVerts, nEdges = len(vs), len(es)
+    for fIdx, f in enumerate(fs):
+        n = len(f)
+        for i in range(n):
+            qs.append([f[i], eHashIdxs[cantorPi(f[i], f[(i+1)%n])] + nVerts, fIdx + nVerts + nEdges, eHashIdxs[cantorPi(f[(i-1)%n], f[i])] + nVerts])
+
+    return np.vstack([vs, eCenters, fCenters]), np.int32(qs)
+
 def hexaToEdges(hexa):
     return np.transpose([hexa[[0,1,2,3,4,5,6,7,0,1,2,3]], hexa[[1,2,3,0,5,6,7,4,4,5,6,7]]])
 
@@ -386,7 +410,8 @@ def Mr3D(alpha=0, beta=0, gamma=0):
 def icdf(xs): # inverse cumulative distribution function
     uxs, iIdxs, cts = np.unique(xs, return_inverse = True, return_counts = True)
     ccts = np.cumsum(cts)-cts[0]
-    return np.clip(ccts[iIdxs] / (len(xs) - cts[0] - cts[-1]), 0, 1)
+    return np.clip(ccts[iIdxs] / (len(xs) - cts[0]), 0, 1)
+    #return np.clip(ccts[iIdxs] / (len(xs) - cts[0] - cts[-1]), 0, 1)
 
 def factorial(n):
     return np.prod(np.arange(n)+1)
@@ -592,7 +617,7 @@ def generateHexGridSamples(pts, n, innerOnly = False):
     return np.dot(generateHexGridSampleWeights(n, innerOnly), pts)
 
 @memoize
-def generateTriGridTriangles(n, innerOnly = False):
+def generateTriGridTriangles(n, innerOnly = False, CCW = True):
     if innerOnly and n <= 2:
         return np.empty([0,3], np.int32)
     tris = []
@@ -605,17 +630,18 @@ def generateTriGridTriangles(n, innerOnly = False):
                 tris.append([t+r, t+r-o, t+r+1])
         o -= 1
         s += o
-    return np.int32(tris)
+    return np.fliplr(tris) if CCW else np.int32(tris)
 
 @memoize
-def generateQuadGridQuads(n, innerOnly = False):
+def generateQuadGridQuads(n, innerOnly = False, CCW = True):
     if innerOnly and n <= 1:
         return np.empty([0,4], np.int32)
     n += 1 - 2*innerOnly
     m = n+1
     vIdxs = lambda i: [i, i+1, i+1+m, i+m]
     ijs = np.vstack([[i,j] for j in range(n) for i in range(n)])
-    return np.vstack([vIdxs(i+m*j) for i,j in ijs])
+    quads = np.vstack([vIdxs(i+m*j) for i,j in ijs])
+    return np.fliplr(quads) if CCW else quads
 
 @memoize
 def generateTetGridTetrahedra(n, innerOnly = False): # not a fully regular fractal subdivision
@@ -1331,6 +1357,27 @@ def computeBaryWeightss(tVertss, pt):
     ws = (computeTriangleAreas(tVertss) if nDim == 2 else computeTetraVolumes(tVertss)).reshape(-1, nDim+1)
     return ws / ws.sum(axis=1).reshape(-1,1)
 
+def computeVertexNormals(vs, fs):
+    ns = np.zeros_like(vs)
+    if type(fs) == list: # polygons
+        for fIdx, f in enumerate(fs):
+            vIdxs = [f[-1]] + (f.tolist() if type(f) != list else f) + [f[0]]
+            evs = normVec(np.diff(vs[vIdxs], 1, axis=0))
+            evsL = evs[1:]
+            evsR = -evs[:-1]
+            angles = np.arccos(np.clip(inner1d(evsL, evsR), -1, 1))
+            normals = cross(evsL, evsR, True) * angles[:,None]
+            ns[f] += normals
+    else: # tris or quads
+        vIdxs = np.pad(fs, [[0,0],[1,1]], mode='wrap')
+        evs = normVec(np.diff(vs[vIdxs], 1, axis=1))
+        evsL = evs[:,1:].reshape(-1,3)
+        evsR = -evs[:,:-1].reshape(-1,3)
+        angles = np.arccos(np.clip(inner1d(evsL, evsR), -1, 1))
+        normals = cross(evsL, evsR, True) * angles[:,None]
+        np.add.at(ns, fs, normals.reshape(-1, fs.shape[1], 3))       
+    return normVec(ns)
+
 def computeGaussianCurvatures(vs, ts): # per vertex
     angles = computeTrianglesAngles(vs[ts])
     return (np.pi * 2) - np.bincount(ts.ravel(), weights = angles.ravel())
@@ -1577,11 +1624,33 @@ def resamplePoly(verts, nTarget, isClosed = True):
     rvs = np.transpose([np.interp(sDists, csLength, v) for v in vs.T])
     return rvs[:-1] if isClosed else rvs
 
-def interpolateBezierTriangle(points, normals):
-    b = lambda i, j: (2*points[i] + points[j] - np.dot(points[j]-points[i], normals[i]) * normals[i])/3
-    bs = np.array([points[0], points[1], points[2], b(0,1), b(1,0), b(1,2), b(2,1), b(2,0), b(0,2)])
-    bezierCenter = bs[3:].sum(axis=0)/4 - bs[:3].sum(axis=0)/6
-    return bezierCenter, normVec(bezierCenter - points.mean(axis=0))
+def interpolatePnEdge(vs, ns, alpha = 0.5):
+    u, v = 1-alpha, alpha
+
+    b = lambda i, j: (2*vs[i] + vs[j] - np.dot(vs[j]-vs[i], ns[i]) * ns[i])/3
+    bs = [vs[0], b(0,1), b(1,0), vs[1]]
+    bws = np.float32([u**3, 3*u**2*v, 3*u*v**2, v**3]).T
+
+    h = lambda i, j: normVec(ns[i]+ns[j] - (vs[j]-vs[i]) * 2*(np.dot(vs[j]-vs[i], ns[i]+ns[j])/np.dot(vs[j]-vs[i], vs[j]-vs[i])))
+    ns = [ns[0], h(0,1), ns[1]]
+    nws = np.float32([u**2, 2*u*v, v**2]).T
+    
+    return np.dot(bws, bs), normVec(np.dot(nws, ns))
+
+def interpolatePnTriangle(vs, ns, uvw = np.float32([1,1,1])/3):
+    # Curved PN Triangles, Vlachos et al., 2001
+    u,v,w = uvw.T
+    
+    b = lambda i, j: (2*vs[i] + vs[j] - np.dot(vs[j]-vs[i], ns[i]) * ns[i])/3
+    bs = np.float32([vs[0], b(0,1), b(1,0), vs[1], b(1,2), b(2,1), vs[2], b(2,0), b(0,2), [0,0,0]])
+    bs[-1] = np.dot(1/np.float32([-6, 4, 4]*3), bs[:-1])
+    bws = np.float32([w**3, 3*w**2*u, 3*w*u**2, u**3, 3*u**2*v, 3*u*v**2, v**3, 3*w*v**2, 3*w**2*v, 6*u*v*w]).T
+
+    h = lambda i, j: normVec(ns[i]+ns[j] - (vs[j]-vs[i]) * 2*(np.dot(vs[j]-vs[i], ns[i]+ns[j])/np.dot(vs[j]-vs[i], vs[j]-vs[i])))
+    ns = [ns[0], h(0,1), ns[1], h(1,2), ns[2], h(2,0)]
+    nws = np.float32([w**2, 2*w*u ,u**2, 2*u*v, v**2, 2*w*v]).T
+
+    return np.dot(bws, bs), normVec(np.dot(nws, ns))
 
 def quaternionSlerp(qa, qb, t):
     # http://www.euclideanspace.com/maths/algebra/realNormedAlgebra/quaternions/slerp/
@@ -1810,3 +1879,35 @@ def computeIsoContours(vs, ts, ss, isoValue, t = eps):
         ec.flush()
 
     return ec.getVertsAndEdges()
+
+def solidify(vs, fs, thickness = -1, offset = 0, shellOnly = True, withBoundary = True):
+    fVal = -1 if type(fs) == list else fs.shape[1]
+    if fVal < 0 and type(fs[0]) == list:
+        fs = [np.int32(f) for f in fs]
+
+    if not shellOnly and fVal != 4:        
+        vs, fs = quadrangulate(vs, fs, fVal == 3)
+    ns = computeVertexNormals(vs, fs)
+
+    if thickness < 0:
+        es = facesToEdges(fs)
+        thickness = norm(vs[es[:,0]] - vs[es[:,1]]).mean()/2    
+    shift = -(offset+1)/2
+    vsNew = np.vstack([vs + ns * thickness * (shift+1), vs + ns * thickness * shift])
+
+    if shellOnly:
+        fsNew = fs + [f[::-1]+len(vs) for f in fs] if fVal < 0 else np.vstack([fs, fs[:,::-1]+len(vs)])
+        if withBoundary:
+            es = facesToEdges(fs, False)
+            unq, inv, cnt = np.unique(cantorPiKV(es), return_inverse = True, return_counts = True)
+            boundaryEdgesMask = cnt[inv] == 1
+            if boundaryEdgesMask.any():
+                boundaryEdges = es[boundaryEdgesMask]
+                boundaryFaces = np.hstack([boundaryEdges[:,::-1], boundaryEdges + len(vs)])
+                if fVal == 3:
+                    boundaryFaces = quadsToTris(boundaryFaces)
+                fsNew = fsNew + [bf for bf in boundaryFaces] if fVal < 0 else np.vstack([fsNew, boundaryFaces])
+        return vsNew, fsNew
+    else:
+        fz = fs[:,[0,3,2,1]]
+        return vsNew, np.hstack([fz, fz + len(vs)])
