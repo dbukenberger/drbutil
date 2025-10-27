@@ -274,6 +274,14 @@ def normZeroToOne(data, axis = None):
     else:
         return (np.float32(data) - np.min(data))/(np.max(data) - np.min(data)) if len(data) else data
 
+def centerAndScaleToBB(pts, BB = None, keepProportions = True):
+    if BB is None:
+        BB = np.repeat([[-1],[1]], pts.shape[1], axis=1)
+    ptz = pts - pts.min(axis=0)
+    ptz /= ptz.max() if keepProportions else ptz.max(axis=0)
+    ptz *= np.dot([-1,1], BB).max() if keepProportions else np.dot([-1,1], BB)
+    return ptz - ptz.max(axis=0)/2 + np.mean(BB, axis=0)
+
 def mnmx(v): return np.float32([v.min(axis = 0), v.max(axis=0)])
 
 def unique2d(a): return a[np.unique(a[:,0] + a[:,1]*1.0j,return_index=True)[1]]
@@ -575,11 +583,11 @@ def generateTriGridSampleWeights(n, innerOnly = False):
 
 @memoize
 def generateQuadGridSampleWeights(n, innerOnly = False):
-    n = max(2,n+2)
-    ws = np.linspace(0,1,n)
+    ns = [n] if np.isscalar(n) else n
+    ws = [np.linspace(0,1,max(2,n+2)) for n in ns]
     if innerOnly:
-        ws = ws[1:-1]
-    u,v = np.dstack(np.meshgrid(ws, ws)).reshape(-1,2).T
+        ws = [w[1:-1] for w in ws]
+    v,u = np.dstack(np.meshgrid(ws[0], ws[1%len(ns)])).reshape(-1,2).T
     return np.transpose([(1-u)*(1-v), u*(1-v), u*v, (1-u)*v])
 
 @memoize
@@ -597,12 +605,12 @@ def generateTetGridSampleWeights(n, innerOnly = False):
 
 @memoize
 def generateHexGridSampleWeights(n, innerOnly = False):
-    n = max(2,n+2)
-    ws = np.linspace(0,1,n)
+    ns = [n] if np.isscalar(n) else n    
+    ws = [np.linspace(0,1,max(2,n+2)) for n in ns]
     if innerOnly:
-        ws = ws[1:-1]
-    u,v,w = np.stack(np.meshgrid(ws, ws, ws), axis=3).reshape(-1, 3).T
-    return np.transpose([(1-u)*(1-v)*(1-w), u*(1-v)*(1-w), u*v*(1-w), (1-u)*v*(1-w), (1-u)*(1-v)*w, u*(1-v)*w, u*v*w, (1-u)*v*w])
+        ws = [w[1:-1] for w in ws]
+    u,v,w = np.transpose(np.stack(np.meshgrid(ws[0], ws[1%len(ns)], ws[2%len(ns)]), axis=3), axes=[2,0,1,3]).reshape(-1,3).T
+    return np.transpose([(1-u)*(1-v)*(1-w), (1-u)*v*(1-w), u*v*(1-w), u*(1-v)*(1-w), (1-u)*(1-v)*w, (1-u)*v*w, u*v*w, u*(1-v)*w])
 
 def generateTriGridSamples(pts, n, innerOnly = False):
     return np.dot(generateTriGridSampleWeights(n, innerOnly), pts) if n-2*innerOnly >= 0 else np.empty((0, pts.shape[1]), np.float32)
@@ -634,13 +642,12 @@ def generateTriGridTriangles(n, innerOnly = False, CCW = True):
 
 @memoize
 def generateQuadGridQuads(n, innerOnly = False, CCW = True):
-    if innerOnly and n <= 1:
+    if innerOnly and (n <= 1 if np.isscalar(n) else max(n) <= 1):
         return np.empty([0,4], np.int32)
-    n += 1 - 2*innerOnly
-    m = n+1
-    vIdxs = lambda i: [i, i+1, i+1+m, i+m]
-    ijs = np.vstack([[i,j] for j in range(n) for i in range(n)])
-    quads = np.vstack([vIdxs(i+m*j) for i,j in ijs])
+    u,v = np.int32([n, n] if np.isscalar(n) else n) + [2,1] - 2*innerOnly
+    ijs = np.vstack(np.dstack(np.meshgrid(np.arange(u-1), np.arange(v))))
+    vIdxs = lambda i: [i, i+u, i+1+u, i+1]
+    quads = np.transpose(vIdxs(np.dot(ijs, [1,u])))
     return np.fliplr(quads) if CCW else quads
 
 @memoize
@@ -667,13 +674,12 @@ def generateTetGridTetrahedra(n, innerOnly = False): # not a fully regular fract
 
 @memoize
 def generateHexGridHexahedra(n, innerOnly = False):
-    if innerOnly and n <= 1:
+    if innerOnly and (n <= 1 if np.isscalar(n) else max(n) <= 1):
         return np.empty([0,8], np.int32)
-    n += 1 - 2*innerOnly
-    m = n+1
-    vIdxs = lambda i: [i+1, i+m+1, i+m+m*m+1, i+1+m*m, i, i+m, i+m+m*m, i+m*m]
-    ijks = np.vstack([[i,j,k] for k in range(n) for j in range(n) for i in range(n)])
-    return np.vstack([vIdxs(i+m*j+m*m*k) for i,j,k in ijks])
+    u,v,w = np.int32([n,n,n] if np.isscalar(n) else n) + [2,2,1] - 2*innerOnly
+    ijks = np.stack(np.meshgrid(np.arange(w, dtype=np.int16), np.arange(v-1, dtype=np.int16), np.arange(u-1, dtype=np.int16), indexing='ij'), axis=-1).reshape(-1,3)
+    vIdxs = lambda i: [i, i+u, i+u+u*v, i+u*v, i+1, i+u+1, i+u+u*v+1, i+u*v+1]
+    return np.transpose(vIdxs(np.dot(ijks, [1,u,u*v])))
 
 def generateTriGrid(n, in3D = False, innerOnly = False):
     vs = generateTriGridSamples(generatePointsOnCircle(3, in3D), n, innerOnly)
@@ -681,7 +687,8 @@ def generateTriGrid(n, in3D = False, innerOnly = False):
     return vs, ts
 
 def generateQuadGrid(n, in3D = False, innerOnly = False):
-    vs = generateQuadGridSamples(pad2Dto3D(quadVerts) if in3D else quadVerts, n, innerOnly)
+    qvs = quadVerts * (1 if np.isscalar(n) else (np.int32(n)+1)/(max(n)+1))
+    vs = generateQuadGridSamples(pad2Dto3D(qvs) if in3D else qvs, n, innerOnly)
     ts = generateQuadGridQuads(n, innerOnly)
     return vs, ts
 
@@ -692,8 +699,9 @@ def generateTetGrid(n, innerOnly = False):
     return vs, ts
 
 def generateHexGrid(n, innerOnly = False):
-    vs = generateHexGridSamples(cubeVerts, n, innerOnly)
-    ts = generateHexGridHexahedra(n, innerOnly)
+    cvs = cubeVerts * (1 if np.isscalar(n) else (np.int32(n)+1)/(max(n)+1))
+    vs = generateHexGridSamples(cvs, n if np.isscalar(n) else tuple(n), innerOnly)
+    ts = generateHexGridHexahedra(n if np.isscalar(n) else tuple(n), innerOnly)
     return vs, ts
 
 def computePointInPolygonKernel(pts, improvementIters = -1):
@@ -820,7 +828,7 @@ def pointInTriangle2D(A, B, C, P):
         u, v, d = -u, -v, -d
     return u >= 0 and v >= 0 and (u + v) <= d
 
-def pointInTriangles2D(ABCs, P):
+def pointInTriangles2D(ABCs, P, returnMask = False):
     v0s, v1s, v2s = ABCs[:,2] - ABCs[:,0], ABCs[:,1] - ABCs[:,0], P - ABCs[:,0]
     us, vs, ds = v2s[:,1] * v0s[:,0] - v2s[:,0] * v0s[:,1], v1s[:,1] * v2s[:,0] - v1s[:,0] * v2s[:,1], v1s[:,1] * v0s[:,0] - v1s[:,0] * v0s[:,1]
     m = ds < 0
@@ -828,7 +836,8 @@ def pointInTriangles2D(ABCs, P):
         us[m] *= -1
         vs[m] *= -1
         ds[m] *= -1
-    return np.bitwise_and(np.bitwise_and(us >= 0, vs >= 0), (us + vs) <= ds).any()    
+    m = np.bitwise_and(np.bitwise_and(us >= 0, vs >= 0), (us + vs) <= ds)
+    return m if returnMask else m.any()
 
 def pointInTriangle3D(A, B, C, P):
     u,v,w = B-A, C-B, A-C
@@ -842,7 +851,7 @@ def pointInTriangle3D(A, B, C, P):
         return False
     return True
 
-def pointInTriangles3D(ABCs, P, uvws = None, ns = None, assumeInPlane = False):
+def pointInTriangles3D(ABCs, P, uvws = None, ns = None, assumeInPlane = False, returnMask = False):
     if uvws is None:
         uvws = ABCs[:,[1,2,0]] - ABCs
     if assumeInPlane:
@@ -850,12 +859,12 @@ def pointInTriangles3D(ABCs, P, uvws = None, ns = None, assumeInPlane = False):
     else:
         m = np.abs(inner1d(P-ABCs[:,0], cross(uvws[:,0], uvws[:,1], True) if ns is None else ns[:,0])) < eps
         if not m.any():
-            return False
+            return m if returnMask else False
     for i in range(3):
         m *= inner1d(cross(uvws[:,i], -uvws[:,(i+2)%3], True) if ns is None else ns[:,i], cross(uvws[:,i], P-ABCs[:,i], True)) > 0
         if not m.any():
-            return False
-    return True
+            return m if returnMask else False
+    return m if returnMask else True
 
 def pointInPolygonKernel2D(pPts, p):
     vTris = pad2Dto3D(np.roll(np.repeat(np.arange(len(pPts)), 2),-1).reshape(-1,2), len(pPts))
