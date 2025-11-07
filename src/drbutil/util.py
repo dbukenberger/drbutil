@@ -315,9 +315,18 @@ def dotAxBs(A, Bs): return np.einsum('jk,ijl->ikl', A, Bs) # np.float32([np.dot(
 
 def Mr2D(a): return np.float32([[np.cos(a), -np.sin(a)], [np.sin(a), np.cos(a)]])
 
+def Mr2Ds(az): return np.transpose(Mr2D(az), axes=[2,0,1])
+
 def Mr(ori): return Mr2D(ori) if np.isscalar(ori) else Mr3D(ori[0], ori[1], ori[2])
 
 def padHor(pts, c=0): return np.pad(pts, [[0,0],[0,1]], mode='constant', constant_values=c)
+
+def padListToArray(rows, padValue = -1):
+    rLens = list(map(len, rows))
+    maxLen = max(rLens)
+    if min(rLens) != maxLen:
+        rows = [np.pad(row, [0, maxLen-len(row)], 'constant', constant_values = padValue) for row in rows]
+    return np.array(rows)
 
 def flatten(lists): return [element for elements in lists for element in elements]
 
@@ -1285,6 +1294,20 @@ def reIndexIndices(arr):
     reIdx = np.zeros(uIdxs.max()+1, np.int32)
     reIdx[uIdxs] = np.argsort(uIdxs)
     return [reIdx[ar] for ar in arr] if type(arr) == list else reIdx[arr]
+
+def averageFaceValuesOnVertices(fs, vals):
+    if type(fs) == list:
+        fs = padListToArray(fs, -1)
+    numVerts = fs.max() + 1 + (fs.min() < 0)
+    vSums = np.zeros(numVerts if vals.ndim == 1 else (numVerts, vals.shape[1]), np.float32)
+    vCnts = np.zeros(numVerts, np.int32)
+    np.add.at(vSums, fs, vals[:,None])
+    np.add.at(vCnts, fs, 1)
+    res = vSums / (vCnts if vals.ndim == 1 else vCnts[:,None])
+    return res[:-1] if fs.min() < 0 else res
+
+def averageVertexValuesOnFaces(fs, vals):
+    return np.array([vals[f].mean(axis=0) for f in fs], dtype = vals.dtype) if type(fs) == list else vals[fs].mean(axis=1)
 
 def computePolygonCentroid2D(pts, withArea=False):
     rPts = np.roll(pts, 1, axis=0)
