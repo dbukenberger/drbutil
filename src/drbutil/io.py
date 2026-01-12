@@ -363,6 +363,8 @@ def writeStressFile(fileName, verts, cells, forceIdxs, forceVecs, fixedIdxs, str
 
         nDim = verts.shape[1]
         cVal = cells.shape[1]
+
+        fh.write('Stress Data Type: %s\n'%('NODE' if len(verts) == len(stress) else 'ELEMENT'))
         
         if nDim == 2:
             fh.write('Plane %s 1\n'%('Tri' if cVal == 3 else 'Quad'))

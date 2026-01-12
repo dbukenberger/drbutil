@@ -52,7 +52,7 @@ except ImportError:
 try:
     from mayavi import mlab
     from traits.api import HasTraits, Range, Instance, on_trait_change, Button, Enum
-    from traitsui.api import View, Item, Group, HSplit
+    from traitsui.api import View, Item, Group, HSplit, VSplit
     from mayavi.core.api import PipelineBase
     from mayavi.core.ui.api import MayaviScene, SceneEditor, MlabSceneModel
     mlabFound = True

@@ -1354,7 +1354,7 @@ def computeTriangleArea(pts, signed = True):
 
 def computeTriangleAreas(pts, signed = True):
     if pts.shape[-1] == 2:
-        areas = simpleDets3x3(np.transpose(np.pad(pts, [[0,0],[0,0],[0,1]], mode='constant',constant_values = 1), axes=[0,2,1]))/2
+        areas = simpleDets2x2(pts[:,[1,2],:] - pts[:,0,None])/2
         return areas if signed else np.abs(areas)
     else:
         return norm(computeTriangleNormals(pts, False))/2
