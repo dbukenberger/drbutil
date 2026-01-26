@@ -1598,6 +1598,15 @@ def computePrincipalStress(sMat):
     o = np.argsort(eVals)[::-1]
     return eVecs.T[o], eVals[o]
 
+def computePrincipalStresses(Ms):
+    nDim = Ms.shape[1]
+    sVals, sVecs = np.linalg.eigh(Ms)
+    o = np.argsort(np.abs(sVals), axis=1)[:,::-1]
+    sVecs = np.transpose(sVecs, axes=[0,2,1])
+    sVecs = sVecs[np.repeat(np.arange(len(Ms)), nDim).reshape(-1, nDim), o]
+    sVals = np.abs(sVals)[np.repeat(np.arange(len(Ms)), nDim).reshape(-1, nDim), o]
+    return sVecs, sVals
+
 def projectPoints(pts, o, n, return2d=False):
     vs = pts - o
     ds = np.dot(vs, n)
@@ -1792,6 +1801,9 @@ def computeAvgTransformation(Ms):
 def orthogonalizeMatrix(M):
     q,r = np.linalg.qr(M) # may produce sign flips
     return np.copysign(q, M)
+
+def orthogonalizeMatrices(Ms):
+    return orthogonalizeMatrix(Ms)
 
 def computeWeightedTransformation(Ms, ws = None):
     ws = np.ones(len(Ms), np.float32) if ws is None else ws
