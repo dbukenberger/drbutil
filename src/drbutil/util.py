@@ -1741,9 +1741,9 @@ def computeMinEulerAngle(A, B):
     return alignBtoA(A, B, True)    
 
 def computeMinEulerAngles(A, Bs):
-    return np.float32([alignBtoA(A, B, True) for B in Bs])
-
-def alignBtoA(A, B, angleOnly = False):
+    return np.float32([alignBtoA(A, B, True, True) for B in Bs])
+    
+def alignBtoA(A, B, angleOnly = False, minOnly = False):
     nDim = A.shape[0]
     if nDim == 2:
         os = [[0,1],[1,0]]
@@ -1752,8 +1752,11 @@ def alignBtoA(A, B, angleOnly = False):
         os = [[0,1,2],[1,2,0],[2,0,1],[0,2,1],[2,1,0],[1,0,2]]
         ss = [[1,1,1],[1,1,-1],[1,-1,1],[1,-1,-1],[-1,1,1],[-1,1,-1],[-1,-1,1],[-1,-1,-1]]
     Bs = np.tile(B[os],[len(ss),1,1]) * np.repeat(ss, len(os), axis=0).reshape(-1,nDim,1)
-    a = np.arccos(np.clip((innerAxBs(A,Bs).sum(axis=1)-1)/2,-1,1))
-    return a.min() if angleOnly else Bs[np.argmin(a)]                
+    dps = innerAxBs(A,Bs)
+    if angleOnly:
+        return np.arccos(np.clip(dps.max(), -1, 1)) if minOnly else np.arccos(np.clip(dps.mean(axis=1), -1, 1)).min()
+    else:
+        return Bs[np.argmax(dps.sum(axis=1))]
 
 def alignBstoA(A, Bs):
     return np.float32([alignBtoA(A, B) for B in Bs])
