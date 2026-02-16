@@ -176,6 +176,15 @@ except ImportError:
     pypardiso = None
 
 
+# fast winding numbers wrapper
+try:
+    import igl
+    iglFound = True
+except ImportError:
+    iglFound = False
+    igl = None
+
+
 # simple logger class
 logging.basicConfig(format='%(message)s')
 class Logger:

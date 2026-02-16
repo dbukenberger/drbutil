@@ -357,14 +357,15 @@ def writeMshFile(filePath, vertices, tets, cols = []): # tet
                 fh.write('%d %g\n'%(i+1, col))
             fh.write('$EndElementData\n')
 
-def writeStressFile(fileName, verts, cells, forceIdxs, forceVecs, fixedIdxs, stress):
+def writeStressFile(fileName, verts, cells, forceIdxs, forceVecs, fixedIdxs, stress = None, fixedDims = None, bcOnly = False):
     with open(fileName, 'w') as fh:
         fh.write('Version 2.0\n')
 
         nDim = verts.shape[1]
         cVal = cells.shape[1]
 
-        fh.write('Stress Data Type: %s\n'%('NODE' if len(verts) == len(stress) else 'ELEMENT'))
+        if stress is not None:
+            fh.write('Stress Data Type: %s\n'%('NODE' if len(verts) == len(stress) else 'ELEMENT'))
         
         if nDim == 2:
             fh.write('Plane %s 1\n'%('Tri' if cVal == 3 else 'Quad'))
@@ -377,7 +378,7 @@ def writeStressFile(fileName, verts, cells, forceIdxs, forceVecs, fixedIdxs, str
             fh.write(vLine%tuple(vert))
 
         fh.write('Elements: %d\n'%len(cells))
-        cLine = ' '.join(['%d']*cVal)+'\n'
+        cLine = ' '.join(['%d']*cVal)+(' 1' if bcOnly else '')+'\n'
         for cell in cells:
             fh.write(cLine%tuple(cell+1))
 
@@ -387,15 +388,24 @@ def writeStressFile(fileName, verts, cells, forceIdxs, forceVecs, fixedIdxs, str
             fh.write('%d '%(fIdx+1) + vLine%tuple(fVec))
 
         fh.write('Fixed Nodes: %d\n'%len(fixedIdxs))
-        for fIdx in fixedIdxs:
-            fh.write('%d\n'%(fIdx+1))
+        if bcOnly:
+            fixedDims = np.ones((len(fixedIdxs), nDim), np.int32) if fixedDims is None else fixedDims
+            fLine = ' '.join(['%d']*(nDim+1))+'\n'
+            for fDat in np.hstack([fixedIdxs[:,None]+1, fixedDims]):
+                fh.write(fLine%tuple(fDat))
+        else:
+            for fIdx in fixedIdxs:
+                fh.write('%d\n'%(fIdx+1))
 
-        fh.write('Cartesian Stress: %d\n'%len(stress))
-        sLine = ' '.join(['%g']*(nDim-1)*3)+'\n'
-        for s in stress:
-            fh.write(sLine%tuple(s))
+            fh.write('Cartesian Stress: %d\n'%len(stress))
+            sLine = ' '.join(['%g']*(nDim-1)*3)+'\n'
+            for s in stress:
+                fh.write(sLine%tuple(s))
 
-def loadStressFile(fileName):
+def writeMiniFemFile(fileName, verts, cells, forceIdxs, forceVecs, fixedIdxs, fixedDims = None):
+    writeStressFile(fileName, verts, cells, forceIdxs, forceVecs, fixedIdxs, fixedDims = fixedDims, bcOnly = True)
+
+def loadStressFile(fileName, bcOnly = False):
     verts = []
     cells = []
     forceIdxs = []
@@ -404,7 +414,6 @@ def loadStressFile(fileName):
     stress = []
     with open(fileName, 'r') as fh:
         mode = None
-        skipOne = True
         for line in fh.readlines():
             line = line.strip()
 
@@ -423,45 +432,54 @@ def loadStressFile(fileName):
                 forceVecs.append(line.split(' ')[1:])
 
             if mode == 'Fixed Nodes':
-                fixedIdxs.append(line)
+                fixedIdxs.append(line.split(' ') if bcOnly else line)
 
             if mode == 'Cartesian Stress':
                 stress.append(line.split(' '))
 
     verts = np.float32(verts)
-    cells = np.int32(cells)-1
     forceIdxs = np.int32(forceIdxs)-1
     forceVecs = np.float32(forceVecs)
-    fixedIdxs = np.int32(fixedIdxs)-1
-    stress = np.float32(stress)
-    if stress.shape[1] == 6:
-        nDim = 3
-        sMats = np.empty((nDim, nDim, len(stress)), np.float32)        
-        s00, s11, s22, s12, s02, s01 = stress.T
-        vmStress = np.sqrt(((s00-s11)**2 + (s11-s22)**2 + (s22-s00)**2 + 6*(s01**2+s12**2+s02**2))/2)
-        sMats[0,0] = s00
-        sMats[[0,1],[1,0]] = s01
-        sMats[1,1] = s11
-        sMats[[0,2],[2,0]] = s02
-        sMats[[1,2],[2,1]] = s12
-        sMats[2,2] = s22
+    if bcOnly:
+        cells = np.int32(cells)[:,:-1]-1
+        fixedDims = np.bool_(fixedIdxs)[:,1:]
+        fixedIdxs = np.int32(fixedIdxs)[:,0]-1
+        return verts, cells, forceIdxs, forceVecs, fixedIdxs, fixedDims
     else:
-        nDim = 2
-        sMats = np.empty((nDim, nDim, len(stress)), np.float32)        
-        s00, s11, s01 = stress.T
-        vmStress = np.sqrt(s00**2 + s11**2 - s00*s11 + 3*s01**2)
-        sMats[0,0] = s00
-        sMats[[0,1],[1,0]] = s01
-        sMats[1,1] = s11
+        cells = np.int32(cells)-1
+        fixedIdxs = np.int32(fixedIdxs)-1
+        stress = np.float32(stress)
+        if stress.shape[1] == 6:
+            nDim = 3
+            sMats = np.empty((nDim, nDim, len(stress)), np.float32)        
+            s00, s11, s22, s12, s02, s01 = stress.T
+            vmStress = np.sqrt(((s00-s11)**2 + (s11-s22)**2 + (s22-s00)**2 + 6*(s01**2+s12**2+s02**2))/2)
+            sMats[0,0] = s00
+            sMats[[0,1],[1,0]] = s01
+            sMats[1,1] = s11
+            sMats[[0,2],[2,0]] = s02
+            sMats[[1,2],[2,1]] = s12
+            sMats[2,2] = s22
+        else:
+            nDim = 2
+            sMats = np.empty((nDim, nDim, len(stress)), np.float32)        
+            s00, s11, s01 = stress.T
+            vmStress = np.sqrt(s00**2 + s11**2 - s00*s11 + 3*s01**2)
+            sMats[0,0] = s00
+            sMats[[0,1],[1,0]] = s01
+            sMats[1,1] = s11
 
-    sMats = np.transpose(sMats, axes = [2,0,1])
+        sMats = np.transpose(sMats, axes = [2,0,1])
 
-    pStress = np.zeros_like(sMats)
-    pStressE = np.zeros((len(stress), nDim), np.float32)
-    for i, sMat in enumerate(sMats):
-        pStress[i], pStressE[i] = computePrincipalStress(sMat)
+        pStress = np.zeros_like(sMats)
+        pStressE = np.zeros((len(stress), nDim), np.float32)
+        for i, sMat in enumerate(sMats):
+            pStress[i], pStressE[i] = computePrincipalStress(sMat)
 
-    return verts, cells, forceIdxs, forceVecs.reshape(-1, nDim), fixedIdxs, vmStress, pStress, pStressE, sMats
+        return verts, cells, forceIdxs, forceVecs, fixedIdxs, vmStress, pStress, pStressE, sMats
+
+def loadMiniFemFile(fileName):
+    return loadStressFile(fileName, True)
 
 def loadVtkFile(fileName):
     verts = []
@@ -524,3 +542,82 @@ def loadHybridFile(fileName, withHexFlags = False):
                 break
 
     return (vertices, faces, polyhedra, np.bool_(hexFlags)) if withHexFlags else (vertices, faces, polyhedra)
+
+def writeTopVoxelFile(fileName, resolution, solidIdxs, forceIdxs, forceVecs, fixedIdxs, fixedDims = None, passiveIdxs = [], additionalLoads = []):
+    with open(fileName, 'w') as fh:
+        fh.write('#Voxel Model for SGLDBench\n')
+        fh.write('Version 1.0\n')
+
+        fh.write('Resolution: %d %d %d\n'%tuple(resolution))
+        fh.write('Density Values: 0\n')
+
+        fh.write('Solid voxels: %d\n'%len(solidIdxs))
+        for sIdx in solidIdxs+1:
+            fh.write('%d\n'%sIdx)
+
+        fh.write('Passive elements: %d\n'%len(passiveIdxs))
+        #for pIdx in passiveIdxs+1:
+        #    fh.write('%d\n'%pIdx)
+
+        fh.write('Fixations: %d\n'%len(fixedIdxs))
+        if len(fixedIdxs):
+            fixedDims = np.ones((len(fixedIdxs), 3), np.int32) if fixedDims is None else fixedDims
+            fLine = ' '.join(['%d']*4)+'\n'
+            for fDat in np.hstack([fixedIdxs[:,None]+1, fixedDims]):
+                fh.write(fLine%tuple(fDat))
+
+        fh.write('Loads: %d\n'%len(forceIdxs))
+        if len(forceIdxs):
+            fLine = ' '.join(['%d']+['%g']*3)+'\n'
+            for fDat in np.hstack([forceIdxs[:,None]+1, forceVecs]):
+                fh.write(fLine%tuple(fDat))
+
+        fh.write('Additional Loads: %d\n'%len(additionalLoads))
+        #for aDat in additionalLoads+1:
+        #    fh.write(fLine%tuple(aDat))
+
+def loadFrcFile(fileName):
+    fixFuns = []
+    flxFuns = []
+    frcVecs = []
+    funData = []
+    with open(fileName, 'r') as fh:
+        for line in fh.readlines():
+            line = line.strip().split(' ')
+            if '#' in line:
+                continue
+                
+            if line[0] == 'file':
+                meshFile = os.path.dirname(fileName) + '/' + line[1]
+                continue
+            if line[0] == 'type':
+                mType = line[1]
+                continue
+                    
+            if line[1] == 'd':
+                d = int(line[2])
+                    
+                if '-' in line[2]:
+                    fData = [-d, float(line[-1])]
+                    f = lambda vs, fIdx, tol = eps: vs[:,funData[fIdx][0]] <= (funData[fIdx][1] + tol)
+                else:
+                    fData = [d, float(line[-1])]
+                    f = lambda vs, fIdx, tol = eps: vs[:,funData[fIdx][0]] >= (funData[fIdx][1] - tol)
+                        
+            elif line[1] == 'r':
+                fData = [np.float32(line[2:-1]), float(line[-1])]
+                f = lambda vs, fIdx, tol = eps: norm(vs - funData[fIdx][0]) < funData[fIdx][1] + tol
+    
+            if line[0] == 'fix':
+                fixFuns.append(f)
+                funData.append(fData)
+            elif line[0] == 'flx':
+                flxFuns.append(f)
+                funData.append(fData)
+            elif line[0] == 'vec':
+                frcVecs.append(np.float32(line[1:]))
+        if len(frcVecs) == 1 and len(flxFuns) > 1:
+            frcVecs = [frcVecs] * len(flxFuns)
+        frcVecs = np.float32(frcVecs)
+
+    return meshFile, mType, fixFuns, flxFuns, frcVecs, funData

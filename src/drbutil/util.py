@@ -4,6 +4,7 @@ import warnings
 from . import np
 from . import scipyFound, scipy, spla
 from . import pypardisoFound, pypardiso
+from . import iglFound, igl
 
 # converting helpers
 
@@ -895,6 +896,17 @@ def pointInPolygons2D(pts, plys, p):
 def pointInTriHull3D(ABCs, p):
     ts = intersectTrianglesWithRay(ABCs, p, normVec(ABCs.max(axis=0).max(axis=0) - p))
     return len(ts)%2    
+
+def slowWindingNumber(vs, ts, ps):
+    wNums = np.zeros(len(ps), np.float32)
+    for pIdx, p in enumerate(ps):
+        rs = vs - p
+        rLens = norm(rs)[ts]
+        r0, r1, r2 = rs[ts[:,0]], rs[ts[:,1]], rs[ts[:,2]]
+        num = inner1d(r0, cross(r1, r2))
+        denom = rLens.prod(axis=1) + rLens[:,0] * inner1d(r0, r1) + rLens[:,1] * inner1d(r0, r2) + rLens[:,2] * inner1d(r1, r2)
+        wNums[pIdx] = np.arctan2(num, denom).sum()
+    return wNums/(2*np.pi)
 
 def arePointsCoplanar(pts):
     if len(pts) <= 3:
@@ -1958,3 +1970,35 @@ def solidify(vs, fs, thickness = -1, offset = 0, shellOnly = True, withBoundary 
     else:
         fz = fs[:,[0,3,2,1]]
         return vsNew, np.hstack([fz, fz + len(vs)])
+
+def voxelize(vs, ts, maxRes = 128, returnAs = 'hexa'):
+    bb = mnmx(vs)
+    ext = np.dot([-1,1], bb)
+
+    rez = np.round(ext/ext.max() * maxRes)
+    res = np.int32(np.ceil(rez/8)*8)
+
+    vz, hz = generateHexGrid(res.max()-1)
+    vz = (vz+1)/2 * res.max()
+    dimMask = np.all([vz[:,d] <= res[d] for d in range(3)], axis=0)
+    vz = vz[dimMask]
+    hz = reIndexIndices(hz[dimMask[hz].all(axis=1)])
+
+    hexCenters = vz[hz].mean(axis=1) if returnAs == 'mesh' else np.abs([0, res[1], 0] - vz[hz].mean(axis=1))
+    hexCenters = hexCenters.reshape(res[0], res[1], res[2], 3)
+    hexCenters = np.transpose(hexCenters, axes = [2,0,1,3]).reshape(-1,3)
+
+    hexVerts = vz if returnAs == 'mesh' else np.abs([0, res[1], 0] - vz)
+    hexVerts = hexVerts.reshape(res[2]+1, res[1]+1, res[0]+1, 3)
+    hexVerts = np.transpose(hexVerts, axes = [0,2,1,3]).reshape(-1,3)
+
+    hullVerts = normZeroToOne(vs, axis=0) * rez
+    wNums = igl.fast_winding_number_for_meshes(hullVerts, ts, hexCenters) if iglFound else slowWindingNumber(hullVerts, ts, hexCenters)
+    ioMsk = wNums > 0.5
+    hz = hz.reshape(res[0], res[1], res[2], -1)
+    hz = np.transpose(hz, axes = [2,0,1,3]).reshape(-1,8)[ioMsk]
+
+    if returnAs == 'hexa':
+        return vz[np.unique(hz.ravel())], reIndexIndices(hz)#[:,[4,5,6,7,0,1,2,3]]
+    elif returnAs == 'voxel':
+        return vz, hexVerts, hz, np.where(ioMsk)[0], res
