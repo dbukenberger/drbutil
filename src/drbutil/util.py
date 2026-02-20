@@ -1974,31 +1974,30 @@ def solidify(vs, fs, thickness = -1, offset = 0, shellOnly = True, withBoundary 
 def voxelize(vs, ts, maxRes = 128, returnAs = 'hexa'):
     bb = mnmx(vs)
     ext = np.dot([-1,1], bb)
+    res = np.int32(np.round(ext/ext.max() * maxRes))
 
-    rez = np.round(ext/ext.max() * maxRes)
-    res = np.int32(np.ceil(rez/8)*8)
-
-    vz, hz = generateHexGrid(res.max()-1)
-    vz = (vz+1)/2 * res.max()
-    dimMask = np.all([vz[:,d] <= res[d] for d in range(3)], axis=0)
+    vz, hz = generateHexGrid(maxRes-1)
+    vz = np.int32((vz+1)/2 * maxRes)
+    dimMask = np.all([vz[:,d] <= res[d]+eps for d in range(3)], axis=0)
     vz = vz[dimMask]
     hz = reIndexIndices(hz[dimMask[hz].all(axis=1)])
 
-    hexCenters = vz[hz].mean(axis=1) if returnAs == 'mesh' else np.abs([0, res[1], 0] - vz[hz].mean(axis=1))
+    hexCenters = vz[hz].mean(axis=1) if returnAs == 'hexa' else np.abs([0, res[1], 0] - vz[hz].mean(axis=1))
     hexCenters = hexCenters.reshape(res[0], res[1], res[2], 3)
     hexCenters = np.transpose(hexCenters, axes = [2,0,1,3]).reshape(-1,3)
+    hexCenters = np.float32((hexCenters-res/2)/maxRes * ext.max() + bb.mean(axis=0))
 
-    hexVerts = vz if returnAs == 'mesh' else np.abs([0, res[1], 0] - vz)
-    hexVerts = hexVerts.reshape(res[2]+1, res[1]+1, res[0]+1, 3)
-    hexVerts = np.transpose(hexVerts, axes = [0,2,1,3]).reshape(-1,3)
-
-    hullVerts = normZeroToOne(vs, axis=0) * rez
-    wNums = igl.fast_winding_number_for_meshes(hullVerts, ts, hexCenters) if iglFound else slowWindingNumber(hullVerts, ts, hexCenters)
+    wNums = igl.fast_winding_number_for_meshes(np.float32(vs), ts, hexCenters) if iglFound else slowWindingNumber(vs, ts, hexCenters)
     ioMsk = wNums > 0.5
     hz = hz.reshape(res[0], res[1], res[2], -1)
     hz = np.transpose(hz, axes = [2,0,1,3]).reshape(-1,8)[ioMsk]
 
     if returnAs == 'hexa':
-        return vz[np.unique(hz.ravel())], reIndexIndices(hz)#[:,[4,5,6,7,0,1,2,3]]
+        vz = vz[np.unique(hz.ravel())]
+        vz = vz/vz.max() * ext.max()
+        return vz-mnmx(vz).mean(axis=0) + bb.mean(axis=0), reIndexIndices(hz)
     elif returnAs == 'voxel':
+        hexVerts = np.abs([0, res[1], 0] - vz)
+        hexVerts = hexVerts.reshape(res[2]+1, res[1]+1, res[0]+1, 3)
+        hexVerts = np.transpose(hexVerts, axes = [0,2,1,3]).reshape(-1,3)
         return vz, hexVerts, hz, np.where(ioMsk)[0], res

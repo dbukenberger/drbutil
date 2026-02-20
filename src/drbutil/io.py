@@ -546,7 +546,7 @@ def loadHybridFile(fileName, withHexFlags = False):
 def writeTopVoxelFile(fileName, resolution, solidIdxs, forceIdxs, forceVecs, fixedIdxs, fixedDims = None, passiveIdxs = [], additionalLoads = []):
     with open(fileName, 'w') as fh:
         fh.write('#Voxel Model for SGLDBench\n')
-        fh.write('Version 1.0\n')
+        fh.write('Version: 1.0\n')
 
         fh.write('Resolution: %d %d %d\n'%tuple(resolution))
         fh.write('Density Values: 0\n')
@@ -575,6 +575,61 @@ def writeTopVoxelFile(fileName, resolution, solidIdxs, forceIdxs, forceVecs, fix
         fh.write('Additional Loads: %d\n'%len(additionalLoads))
         #for aDat in additionalLoads+1:
         #    fh.write(fLine%tuple(aDat))
+
+def loadTopVoxelFile(fileName):
+    solidIdxs = []
+    densityValues = []
+    passiveIdxs = []
+    forceIdxs = []
+    forceVecs = []
+    fixedIdxs = []
+    fixedDims = []
+    with open(fileName, 'r') as fh:
+        mode = None
+        for line in fh.readlines():
+            line = line.strip()
+
+            if ':' in line:
+                mode, num = line.split(':')
+                if 'Resolution' in mode:
+                    res = np.int32(num.strip().split(' '))
+                if 'Density' in mode:
+                    withDensity = '1' in num
+                continue
+
+            if mode is None:
+                continue
+
+            if 'Solid' in mode:
+                vals = line.split(' ')
+                solidIdxs.append(vals[0])
+                if withDensity:
+                    densityValues.append(vals[-1])
+
+            if 'Passive' in mode:
+                passiveIdxs.append(line)
+
+            if 'Fixations' in mode:
+                fixedIdxs.append(line.split(' ')[0])
+                fixedDims.append(line.split(' ')[1:])
+
+            if 'Loads' in mode:
+                forceIdxs.append(line.split(' ')[0])
+                forceVecs.append(line.split(' ')[1:])
+
+            #if 'Additional' in mode:
+            #    addLoads.append(line.split(' '))
+
+    solidIdxs = np.int32(solidIdxs)-1
+    densityValues = np.float32(densityValues) if withDensity else np.ones(len(solidIdxs), np.float32)
+    passiveIdxs = np.int32(passiveIdxs)
+    forceIdxs = np.int32(forceIdxs)-1
+    forceVecs = np.float32(forceVecs)
+    fixedIdxs = np.int32(fixedIdxs)-1
+    fixedDims = np.int32(fixedDims)
+
+    return res, solidIdxs, densityValues, passiveIdxs, forceIdxs, forceVecs, fixedIdxs, fixedDims
+    
 
 def loadFrcFile(fileName):
     fixFuns = []
