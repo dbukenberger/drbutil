@@ -92,7 +92,7 @@ def tetToEdges(tet):
     return np.transpose([tet[[0,1,2,1,2,3]], tet[[1,2,3,3,0,0]]])
 
 def tetsToEdges(tets):
-    es = np.vstack([tetToEdges(tet) for tet in tets])
+    es = np.vstack(np.dstack([tets[:,[0,1,2,1,2,3]], tets[:,[1,2,3,3,0,0]]]))
     es.sort(axis=1)
     return unique2d(es)
 
@@ -1459,6 +1459,19 @@ def filterForManifoldness(vs, ts):
 
     mts = ts[tMsk]
     return filterForManifoldness(vs[np.unique(mts.ravel())], reIndexIndices(mts))
+
+def generateAdjacencyList(ss, mode = 'tri'):
+    if mode in ['tri','quad','poly']:
+        es = facesToEdges(ss)
+    elif mode == 'tet':
+        es = tetsToEdges(ss)
+    elif mode == 'hex':
+        es = hexasToEdges(ss)
+    nVerts = es.max()+1  
+    ez = np.vstack([es, es[:,::-1]])
+    es = ez[np.lexsort(ez.T)]
+    offsets = [0] + np.cumsum(np.bincount(es[:,-1], minlength = nVerts)).tolist()
+    return [es[offsets[i]:offsets[i+1],0] for i in range(nVerts)]
 
 def computeSystemMatrix(vs, ts, useCotan = True):
     idxs, jdxs = ts[:,[1,2,0]].T.ravel(), ts[:,[2,0,1]].T.ravel()
