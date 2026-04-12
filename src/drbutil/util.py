@@ -1460,6 +1460,13 @@ def filterForManifoldness(vs, ts):
     mts = ts[tMsk]
     return filterForManifoldness(vs[np.unique(mts.ravel())], reIndexIndices(mts))
 
+def extractBoundaryFromVolumeMesh(vs, cs):
+    fs = tetrasToFaces(cs) if cs.shape[1] == 4 else hexasToFaces(cs)[:,::-1]
+    unq, inv, cnt = np.unique(cantorPiKV(fs), return_inverse = True, return_counts = True)
+    boundaryFaceMask = cnt[inv] == 1
+    fz = fs[boundaryFaceMask]
+    return vs[np.unique(fz.ravel())], reIndexIndices(fz)
+
 def generateAdjacencyList(ss, mode = 'tri'):
     if mode in ['tri','quad','poly']:
         es = facesToEdges(ss)
