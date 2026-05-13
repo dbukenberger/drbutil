@@ -662,7 +662,11 @@ def loadFrcFile(fileName):
             elif line[1] == 'r':
                 fData = [np.float32(line[2:-1]), float(line[-1])]
                 f = lambda vs, fIdx, tol = eps: norm(vs - funData[fIdx][0]) < funData[fIdx][1] + tol
-    
+
+            elif line[1] == 'b':
+                fData = np.float32(line[2:]).reshape(2, -1)
+                f = lambda vs, fIdx, tol = eps: np.bitwise_and((vs + eps >= funData[fIdx][0]).all(axis=1), (vs - eps <= funData[fIdx][1]).all(axis=1))
+
             if line[0] == 'fix':
                 fixFuns.append(f)
                 funData.append(fData)

@@ -1480,13 +1480,18 @@ def generateAdjacencyList(ss, mode = 'tri'):
     offsets = [0] + np.cumsum(np.bincount(es[:,-1], minlength = nVerts)).tolist()
     return [es[offsets[i]:offsets[i+1],0] for i in range(nVerts)]
 
+def safeDivide(num, denum):
+    vals = num * 0
+    np.divide(num, denum, out = vals, where = denum > 0)
+    return vals
+
 def computeSystemMatrix(vs, ts, useCotan = True):
     idxs, jdxs = ts[:,[1,2,0]].T.ravel(), ts[:,[2,0,1]].T.ravel()
     if useCotan:
         eVecs = vs[ts] - vs[ts[:,[2,0,1]]]
         e120 = np.vstack([eVecs[:,i,:] for i in range(3)])
         e201 = np.vstack([eVecs[:,(i+1)%3,:] for i in range(3)])
-        vals = inner1d(-e120, e201) / norm(cross(-e120, e201))
+        vals = safeDivide(inner1d(-e120, e201), norm(cross(-e120, e201)))
     else:
         vals = np.ones(len(ts)*3)
 
@@ -1508,7 +1513,7 @@ def computeMassMatrix(vs, ts):
     Atri = np.sqrt(s * (s[:,None]-eLens).prod(axis=-1))
 
     a2, b2, c2 = eLenSqs, np.roll(eLenSqs, -1, axis=1), np.roll(eLenSqs, -2, axis=1)
-    cosAngles = (b2 + c2 - a2) / (2 * np.sqrt(b2 * c2))
+    cosAngles = safeDivide((b2 + c2 - a2), (2 * np.sqrt(b2 * c2)))
     angles = np.arccos(np.clip(cosAngles, -1, 1))
 
     lnCt = eLenSqs / np.tan(np.maximum(angles, eps))
@@ -2007,7 +2012,7 @@ def voxelize(vs, ts, maxRes = 128, returnAs = 'hexa'):
     hexCenters = np.transpose(hexCenters, axes = [2,0,1,3]).reshape(-1,3)
     hexCenters = np.float32((hexCenters-res/2)/maxRes * ext.max() + bb.mean(axis=0))
 
-    wNums = igl.fast_winding_number_for_meshes(np.float32(vs), ts, hexCenters) if iglFound else slowWindingNumber(vs, ts, hexCenters)
+    wNums = igl.fast_winding_number(np.asarray(vs, dtype=np.float32), np.asarray(ts, dtype=np.int32), hexCenters) if iglFound else slowWindingNumber(vs, ts, hexCenters)
     ioMsk = wNums > 0.5
     hz = hz.reshape(res[0], res[1], res[2], -1)
     hz = np.transpose(hz, axes = [2,0,1,3]).reshape(-1,8)[ioMsk]

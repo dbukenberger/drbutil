@@ -133,7 +133,7 @@ try:
         fPlot.glyph.glyph_source.glyph_position = 'center' if centered else 'tail'
 
 
-except ImportError:
+except (ImportError, ValueError) as e:
     mlabFound = False
 
 
