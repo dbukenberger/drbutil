@@ -110,13 +110,13 @@ def loadMeshFile(fileName):
 
     return res
 
-def writeObjFile(filePath, vertices, faces, edges=[], comment='', subTags=[], roundFloats = True):
-    with open(filePath, 'w') as fh:
+def writeObjFile(fileName, vertices, faces, edges=[], comment='', subTags=[], roundFloats = True):
+    with open(fileName, 'w') as fh:
         fh.write('# obj export\n')
         if len(comment):
             fh.write('# %s\n'%comment)
         if not len(subTags):
-            fh.write('o %s\n' % os.path.basename(filePath)[:-4])
+            fh.write('o %s\n' % os.path.basename(fileName)[:-4])
             for vertex in vertices:
                 if roundFloats:
                     fh.write('v %0.6f %0.6f %0.6f\n' % tuple(vertex))
@@ -143,8 +143,8 @@ def writeObjFile(filePath, vertices, faces, edges=[], comment='', subTags=[], ro
                         fh.write('l %d %d\n' % tuple(edge + vOffset + 1))
                 vOffset += len(vertices[subIdx])
 
-def writeOvmFile(filePath, vertices, faces, cells):
-    with open(filePath, 'w') as fh:
+def writeOvmFile(fileName, vertices, faces, cells):
+    with open(fileName, 'w') as fh:
         fh.write('OVM ASCII\n')
 
         fh.write('Vertices\n%d\n'%len(vertices))
@@ -199,8 +199,8 @@ def writeOvmFile(filePath, vertices, faces, cells):
         for cell in polyhedra:
             fh.write((str(len(cell)) + ' %d' * len(cell) + '\n') % tuple(cell))
 
-def writeTxtFile(filePath, data):
-    with open(filePath, 'w') as fh:
+def writeTxtFile(fileName, data):
+    with open(fileName, 'w') as fh:
         if type(data) == str:
             fh.write(data)
         else:
@@ -208,9 +208,9 @@ def writeTxtFile(filePath, data):
                 fmt = '%f' if type(line[0]) == float else '%d'
                 fh.write(' '.join([fmt%e for e in line]) + '\n')
 
-def writePlyFile(filePath, vertices, faces = [], edges = [], verticesColors = [], verticesNormals = [], withAln = False, cmnt = None):
-    with open(filePath, 'w') as fh:
-        fh.write('ply\nformat ascii 1.0\ncomment %s\n'%os.path.basename(filePath)[:-4])
+def writePlyFile(fileName, vertices, faces = [], edges = [], verticesColors = [], verticesNormals = [], withAln = False, cmnt = None):
+    with open(fileName, 'w') as fh:
+        fh.write('ply\nformat ascii 1.0\ncomment %s\n'%os.path.basename(fileName)[:-4])
         if cmnt is not None:
             fh.write('comment %s\n'%cmnt)
         fh.write('element vertex %d\n'%len(vertices))
@@ -243,8 +243,8 @@ def writePlyFile(filePath, vertices, faces = [], edges = [], verticesColors = []
             fh.write('%d %d\n'%tuple(edge))
 
     if withAln:
-        with open(filePath[:-3] + 'aln', 'w') as fh:
-            fh.write('1\n%s\n#\n'%os.path.basename(filePath))
+        with open(fileName[:-3] + 'aln', 'w') as fh:
+            fh.write('1\n%s\n#\n'%os.path.basename(fileName))
             fh.write('\n'.join([str(r)[1:-1] for r in np.eye(4)]))
             fh.write('\n0\n')
 
@@ -283,8 +283,57 @@ def loadPlyFile(fileName):
     else:
         return verts, faces
 
-def writeMeshFile(filePath, vertices, hexas): # hex
-    with open(filePath, 'w') as fh:
+def loadStlFile(fileName, mergeVerts = True):
+    fileSize = os.path.getsize(fileName)
+    with open(fileName, "rb") as fh:
+        fh.seek(80)
+        nTris = np.fromfile(fh, dtype = np.uint32, count = 1)[0].astype(np.uint64)
+        if fileSize == 84 + nTris * 50: # binary
+            data = np.fromfile(fh, dtype = np.dtype([("normals", "<f4", (3,)), ("vertices", "<f4", (3, 3)), ("attr", "<u2")]), count = nTris)
+            vs = data["vertices"].reshape(-1, 3)
+        else: # ascii
+            fh.seek(0)
+            vs = []
+            for line in fh:
+                line = line.decode("utf-8").strip()
+                if 'vertex' in line:
+                    vs.append(list(map(float, line.split(' ')[1:])))
+            vs = np.float32(vs)
+            
+    if mergeVerts:
+        us, uIdxs, iIdxs = np.unique(np.round(vs / eps).astype(np.int64), axis=0, return_index=True, return_inverse=True)
+        vs = vs[uIdxs]
+        ts = iIdxs.reshape(-1, 3)
+    else:
+        ts = np.arange(len(vs)).reshape(-1,3)
+
+    return vs, ts
+
+def writeStlFile(fileName, vertices, tris, binary = True, comment = ''):
+    normals = computeTriangleNormals(vertices[tris])
+    if binary:
+        with open(fileName, "wb") as fh:
+            fh.write(comment.encode("ascii")[:80].ljust(80, b"\0"))
+            fh.write(np.asarray(len(tris), '<u4').tobytes())
+            for n, t in zip(normals, tris):
+                fh.write(np.asarray(n, '<f4').tobytes())
+                for v in vertices[t]:
+                    fh.write(np.asarray(v, '<f4').tobytes())
+                fh.write(np.asarray(0, '<u2').tobytes())               
+    else:
+        with open(fileName, "w") as fh:
+            fh.write(f'solid\n')
+            for n, t in zip(normals, tris):
+                fh.write(f'facet normal %0.6g %0.6g %0.6g\n' % tuple(n))
+                fh.write(' outer loop\n')
+                for v in vertices[t]:
+                    fh.write(f'  vertex %0.6g %0.6g %0.6g\n' % tuple(v))
+                fh.write(' endloop\n')
+                fh.write('endfacet\n')
+            fh.write(f'endsolid\n')
+
+def writeMeshFile(fileName, vertices, hexas): # hex
+    with open(fileName, 'w') as fh:
         fh.write('MeshVersionFormatted 1\nDimension 3\n')
 
         fh.write('Vertices\n%d\n'%len(vertices))
@@ -297,10 +346,10 @@ def writeMeshFile(filePath, vertices, hexas): # hex
 
         fh.write('End\n')
 
-def loadMshFile(filePath):
+def loadMshFile(fileName):
     verts = []
     tets = []
-    with open(filePath, 'r') as fh:
+    with open(fileName, 'r') as fh:
         mode = None
         skipOne = False
         for line in fh.readlines():
@@ -341,8 +390,8 @@ def loadMshFile(filePath):
 
     return res
 
-def writeMshFile(filePath, vertices, tets, cols = []): # tet
-    with open(filePath, 'w') as fh:
+def writeMshFile(fileName, vertices, tets, cols = []): # tet
+    with open(fileName, 'w') as fh:
         fh.write('$MeshFormat\n2.2 0 8\n$EndMeshFormat\n$Nodes\n%d\n'%len(vertices))
         for i, vertex in enumerate(vertices):
             fh.write('%d %0.6f %0.6f %0.6f\n'%(i+1, vertex[0], vertex[1], vertex[2]))
