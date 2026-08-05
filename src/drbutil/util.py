@@ -293,6 +293,8 @@ def randomJitter(n, k, s=1): return normVec(np.random.rand(n, k) * 2 - 1) * np.r
 
 def generateJitteredGridPoints(n, d, e=1): return generateGridPoints(n, d, e) + randomJitter(n**d, d, e / n)
 
+def randomDirection(n, k): return normVec(np.random.normal(size=(n, k)))
+
 def vecsParallel(u, v, signed=False): return 1 - np.dot(u, v) < eps if signed else 1 - np.abs(np.dot(u, v)) < eps
 
 def distPointToPlane(p, o, n): return np.abs(np.dot(p - o, n))
@@ -812,7 +814,7 @@ def intersectEdgesWithRay2D(ABs, C, d):
     ts[m] /= dNom[m]
     ss[m] /= dNom[m]
 
-    m = np.bitwise_or(np.bitwise_or(ts <= 0, ss <= 0), ts > norm(ABs[:,1] - ABs[:,0]))
+    m = np.bitwise_or(m^True, np.bitwise_or(np.bitwise_or(ts <= 0, ss <= 0), ts > norm(ABs[:,1] - ABs[:,0])))
     ss[m] = ss.max()
     return C + d * ss[ss.argmin()]
 
