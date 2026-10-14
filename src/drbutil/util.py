@@ -270,10 +270,12 @@ def normVec(v, withLen = False):
 def norm(v): return np.sqrt(np.dot(v, v) if v.ndim == 1 else inner1d(v, v))
 
 def normZeroToOne(data, axis = None):
+    if type(data) == list:
+        data = np.float32(data)
     if axis is not None and data.ndim > 1:
-        return (np.float32(data) - np.min(data, axis=axis))/(np.max(data, axis=axis) - np.min(data, axis=axis))
+        return (data - np.min(data, axis=axis)[:,None])/(np.max(data, axis=axis) - np.min(data, axis=axis))[:,None]
     else:
-        return (np.float32(data) - np.min(data))/(np.max(data) - np.min(data)) if len(data) else data
+        return (data - np.min(data))/(np.max(data) - np.min(data)) if len(data) else data
 
 def centerAndScaleToBB(pts, BB = None, keepProportions = True):
     if BB is None:
@@ -1180,6 +1182,11 @@ def ringNeighborElements(elements, vIdxs, n = 0):
     eMasked = elements[msk]
     return ringNeighborElements(elements, np.unique(eMasked.ravel()), n-1) if n else eMasked
 
+def ringNeighbors(elements, vIdx, n = 0, withvIdx = False):
+    nElems = ringNeighborElements(elements, [vIdx], n)
+    nIdxs = np.unique(nElems.ravel())
+    return nIdxs if withvIdx else nIdxs[nIdxs != vIdx]
+
 def computeConvexPolygonVertexOrder(pts, refPt = None):
     cPt = pts.mean(axis=0)
     if refPt is not None:
@@ -1299,9 +1306,8 @@ def filterForUniqueEdges(edges):
     return edges[uIdxs]
 
 def filterForSingleEdges(edges):
-    hashs = cantorPiV(edges)
-    uHashs, uIdxs, uCounts = np.unique(hashs, return_index=True, return_counts=True)
-    return np.array([edges[idx] for idx, count in zip(uIdxs, uCounts) if count == 1])
+    uHashs, uIdxs, uCounts = np.unique(cantorPiV(edges), return_index=True, return_counts=True)
+    return edges[uIdxs[uCounts == 1]]
 
 def reIndexIndices(arr):
     uIdxs = np.unique(flatten(arr) if type(arr) == list else arr.ravel())
@@ -1531,11 +1537,14 @@ def computeMassMatrix(vs, ts):
     [np.add.at(Av, ts[:,i], Amix[:,i]) for i in range(3)]
     return scipy.sparse.diags(Av) if scipyFound else np.diag(Av)
 
-def smoothen(vs, ts, nIters = 10, t = None, useCotan = True, volumeHack = True, mpSolve = True):
+def smoothen(vs, ts, nIters = 10, t = None, useCotan = True, volumeHack = True, mpSolve = True, fixBoundary = False):
     if t is None:
         es = facesToEdges(ts)
         t = norm(vs[es[:,0]] - vs[es[:,1]]).mean() ** 2
         #t = norm(np.dot([-1,1], mnmx(vs)))**2 / len(vs)
+
+    if fixBoundary:
+        bIdxs = np.unique(filterForSingleEdges(facesToEdges(ts, False)).ravel())    
 
     if volumeHack:
         volInit = computePolyVolume(vs, ts)
@@ -1545,10 +1554,20 @@ def smoothen(vs, ts, nIters = 10, t = None, useCotan = True, volumeHack = True, 
 
     S, M = computeSystemMatrix(vs, ts, useCotan), computeMassMatrix(vs, ts)
     MtS = M - t * S
-    for i in range(nIters):
-        vs = solve(MtS, M.dot(vs))
 
-    if volumeHack:
+    if fixBoundary and len(bIdxs):
+        MtS = MtS.tolil()
+        MtS[bIdxs,:] = 0
+        MtS[bIdxs,bIdxs] = 1
+        MtS = MtS.tocsr()
+    
+    for i in range(nIters):
+        b = M.dot(vs)
+        if fixBoundary and len(bIdxs):
+            b[bIdxs] = vs[bIdxs]
+        vs = solve(MtS, b)
+
+    if volumeHack and not fixBoundary:
         volNew = computePolyVolume(vs, ts)
         vs = c + (vs - c) * (volInit/volNew)**(1/3)
 
@@ -1781,21 +1800,27 @@ def computeMinEulerAngle(A, B):
 
 def computeMinEulerAngles(A, Bs):
     return np.float32([alignBtoA(A, B, True, True) for B in Bs])
-    
+
+@memoize
+def _getOrdsAndSgns(nDim):
+    if nDim == 2:
+        ords = [[0,1],[1,0]]
+        sgns = [[1,1],[1,-1],[-1,1],[-1,-1]]
+    else:
+        ords = [[0,1,2],[1,2,0],[2,0,1],[0,2,1],[2,1,0],[1,0,2]]
+        sgns = [[1,1,1],[1,1,-1],[1,-1,1],[1,-1,-1],[-1,1,1],[-1,1,-1],[-1,-1,1],[-1,-1,-1]]
+    return np.int32(ords), np.tile(sgns, [len(ords),1]).reshape(-1,nDim,1)
+
 def alignBtoA(A, B, angleOnly = False, minOnly = False):
     nDim = A.shape[0]
-    if nDim == 2:
-        os = [[0,1],[1,0]]
-        ss = [[1,1],[1,-1],[-1,1],[-1,-1]]
-    else:
-        os = [[0,1,2],[1,2,0],[2,0,1],[0,2,1],[2,1,0],[1,0,2]]
-        ss = [[1,1,1],[1,1,-1],[1,-1,1],[1,-1,-1],[-1,1,1],[-1,1,-1],[-1,-1,1],[-1,-1,-1]]
-    Bs = np.tile(B[os],[len(ss),1,1]) * np.repeat(ss, len(os), axis=0).reshape(-1,nDim,1)
-    dps = innerAxBs(A,Bs)
+    ords, signs = _getOrdsAndSgns(nDim)
+    Bs = B[ords.repeat(2**nDim, axis=0)] * signs
     if angleOnly:
+        dps = innerAxBs(A,Bs)
         return np.arccos(np.clip(dps.max(), -1, 1)) if minOnly else np.arccos(np.clip(dps.mean(axis=1), -1, 1)).min()
     else:
-        return Bs[np.argmax(dps.sum(axis=1))]
+        Ds = Bs-A
+        return Bs[np.argmin(np.einsum('nij,nij->n', Ds, Ds))]
 
 def alignBstoA(A, Bs):
     return np.float32([alignBtoA(A, B) for B in Bs])
@@ -1965,6 +1990,87 @@ def computeIsoContours(vs, ts, ss, isoValue, t = eps):
         ec.flush()
 
     return ec.getVertsAndEdges()
+
+def clipByIsoValues(vs, ts, ss, isoValue, t = eps):
+    vIo = ss > isoValue
+    tMsk = np.all(vIo[ts], axis=1)
+    ess = facesToEdges(ts, False).reshape(-1,3,2)
+
+    newVerts = []
+    newTris = []
+    cutEdgeVertIdxs = {}
+    for tIdx, t in enumerate(ts):
+        if tMsk[tIdx]:
+            newTris.append(t)
+        else:
+            newFace = []
+            for e in ess[tIdx]:
+                pIo, qIo = vIo[e]
+                if pIo and qIo:
+                    newFace.append(e[0])
+                elif pIo or qIo:
+                    eHash = cantorPi(e[0], e[1])
+                    if eHash in cutEdgeVertIdxs.keys():
+                        newVertIdx = cutEdgeVertIdxs[eHash]
+                    else:
+                        newVertIdx = len(vs) + len(newVerts)
+                        cutEdgeVertIdxs[eHash] = newVertIdx
+                                 
+                    if pIo:
+                        newFace.append(e[0])
+                    newFace.append(newVertIdx)
+
+                    ws = np.abs(isoValue - ss[e]) / np.abs(ss[e[1]] - ss[e[0]])
+                    newVert = np.dot(1-ws, vs[e])
+                    newVerts.append(newVert)
+
+            if len(newFace) == 3:
+                newTris.append(newFace)
+            elif len(newFace) == 4:
+                newTris.append([newFace[0], newFace[1], newFace[2]])
+                newTris.append([newFace[2], newFace[3], newFace[0]])
+            
+    vz = np.vstack([vs, newVerts])
+    tz = np.int32(newTris)       
+
+    return vz[np.unique(tz.ravel())], reIndexIndices(tz)
+
+def weldCuts(vs, ts):
+    ps = edgesToPaths(filterForSingleEdges(facesToEdges(ts, False)))
+    dDone = np.zeros(len(ps), np.bool_)
+    mPairz = []
+    for pIdx, p in enumerate(ps):
+        if dDone[pIdx]:
+            continue
+        for qIdx, q in enumerate(ps):
+            if pIdx == qIdx or len(p) != len(q) or dDone[qIdx]:
+                continue
+            
+            sIdx0 = norm(vs[q] - vs[p[0]]).argmin()
+            sIdx1 = norm(vs[q] - vs[p[1]]).argmin()
+            if sIdx0 < sIdx1:
+                q = np.roll(q, -sIdx0)
+            else:
+                q = np.roll(q, -sIdx0-1)[::-1]
+
+            if np.sum((vs[p] - vs[q])**2) < eps:
+                mPairz.append(np.transpose([p, q]))
+                dDone[pIdx] = True
+                dDone[qIdx] = True
+                break
+    mPairz = np.vstack(mPairz)
+    tz = ts.copy()
+    vz = vs.copy()
+    
+    vReps, vKeys = mPairz[np.argsort(mPairz[:,1])].T
+    vIdxs = np.searchsorted(vKeys, tz)
+    vMask = vIdxs < len(vKeys)
+    vIdxs[vMask^True] = 0
+    vMask &= (vKeys[vIdxs] == tz)
+    tz[vMask] = vReps[vIdxs[vMask]]
+
+    vz[mPairz[:,0]] = vz[mPairz].mean(axis=1)
+    return vz[np.unique(tz.ravel())], reIndexIndices(tz)
 
 def solidify(vs, fs, thickness = -1, offset = 0, shellOnly = True, withBoundary = True):
     fVal = -1 if type(fs) == list else fs.shape[1]
