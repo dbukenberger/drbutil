@@ -1494,48 +1494,67 @@ def safeDivide(num, denum):
     return vals
 
 def computeSystemMatrix(vs, ts, useCotan = True):
-    idxs, jdxs = ts[:,[1,2,0]].T.ravel(), ts[:,[2,0,1]].T.ravel()
-    if useCotan:
-        eVecs = vs[ts] - vs[ts[:,[2,0,1]]]
-        e120 = np.vstack([eVecs[:,i,:] for i in range(3)])
-        e201 = np.vstack([eVecs[:,(i+1)%3,:] for i in range(3)])
-        vals = safeDivide(inner1d(-e120, e201), norm(cross(-e120, e201)))
+    nVerts = len(vs)
+    if ts.shape[1] == 3:
+        idxs, jdxs = ts[:,[1,2,0]].T.ravel(), ts[:,[2,0,1]].T.ravel()
+        if useCotan:
+            eVecs = vs[ts] - vs[ts[:,[2,0,1]]]
+            e120 = np.vstack([eVecs[:,i,:] for i in range(3)])
+            e201 = np.vstack([eVecs[:,(i+1)%3,:] for i in range(3)])
+            vals = safeDivide(inner1d(-e120, e201), norm(cross(-e120, e201)))/2
+        else:
+            vals = np.ones(len(ts)*3)/2
     else:
-        vals = np.ones(len(ts)*3)
+        idxz, jdxz = [[0,0,0,1,1,2], [1,2,3,2,3,3]]
+        idxs, jdxs = ts[:, idxz].ravel(), ts[:, jdxz].ravel()
+        if useCotan:
+            grads = np.linalg.inv(padHor(vs,1)[ts])[:,:-1,:].transpose(0,2,1)
+            tVols = computeTetraVolumes(vs[ts], False)
+            vals = (-tVols[:,None] * np.einsum('ijk,ijk->ij', grads[:,idxz,:], grads[:,jdxz,:])).ravel()
+        else:
+            vals = np.ones(len(ts)*6)
 
     if scipyFound:
-        S = scipy.sparse.coo_matrix((vals/2, (idxs, jdxs)), shape=(len(vs), len(vs)))
+        S = scipy.sparse.coo_matrix((vals, (idxs, jdxs)), shape=(nVerts, nVerts))
         S += S.T
-        return -(scipy.sparse.diags(np.array(S.sum(axis=1)).flatten()) - S)
+        return S - scipy.sparse.diags(S.sum(axis=1).A1)
     else:
-        S = np.zeros((len(vs), len(vs)))
-        S[idxs,jdxs] = vals/2
+        S = np.zeros((nVerts, nVerts))
+        np.add.at(S, (idxs, jdxs), vals)
         S += S.T
-        return -(np.diag(S.sum(axis=1)) - S)
+        return S - np.diag(S.sum(axis=1))
 
 def computeMassMatrix(vs, ts):
-    eVecs = vs[ts[:,[1,2,0]]] - vs[ts[:,[2,0,1]]]
-    eLenSqs = inner1d(eVecs, eVecs)
-    eLens = np.sqrt(eLenSqs)
-    s = eLens.sum(axis=1)/2
-    Atri = np.sqrt(s * (s[:,None]-eLens).prod(axis=-1))
+    if ts.shape[1] == 3:
+        eVecs = vs[ts[:,[1,2,0]]] - vs[ts[:,[2,0,1]]]
+        eLenSqs = inner1d(eVecs, eVecs)
+        eLens = np.sqrt(eLenSqs)
+        s = eLens.sum(axis=1)/2
+        Atri = np.sqrt(s * (s[:,None]-eLens).prod(axis=-1))
 
-    a2, b2, c2 = eLenSqs, np.roll(eLenSqs, -1, axis=1), np.roll(eLenSqs, -2, axis=1)
-    cosAngles = safeDivide((b2 + c2 - a2), (2 * np.sqrt(b2 * c2)))
-    angles = np.arccos(np.clip(cosAngles, -1, 1))
+        a2, b2, c2 = eLenSqs, np.roll(eLenSqs, -1, axis=1), np.roll(eLenSqs, -2, axis=1)
+        cosAngles = safeDivide((b2 + c2 - a2), (2 * np.sqrt(b2 * c2)))
+        angles = np.arccos(np.clip(cosAngles, -1, 1))
 
-    lnCt = eLenSqs / np.tan(np.maximum(angles, eps))
-    Avor = (lnCt.sum(axis=1)[:,None] - lnCt)/8
+        lnCt = eLenSqs / np.tan(np.maximum(angles, eps))
+        Avor = (lnCt.sum(axis=1)[:,None] - lnCt)/8
 
-    obtuseVertMsk = angles > np.pi/2
-    obtuseTriMsk = obtuseVertMsk.any(axis=1)
-    Asafe = Atri[:,None] / (2 * (2-obtuseVertMsk))
+        obtuseVertMsk = angles > np.pi/2
+        obtuseTriMsk = obtuseVertMsk.any(axis=1)
+        Asafe = Atri[:,None] / (2 * (2-obtuseVertMsk))
 
-    Amix = np.where(obtuseTriMsk[:,None], Asafe, Avor)
+        Amix = np.where(obtuseTriMsk[:,None], Asafe, Avor)
 
-    Av = np.zeros(len(vs))
-    [np.add.at(Av, ts[:,i], Amix[:,i]) for i in range(3)]
-    return scipy.sparse.diags(Av) if scipyFound else np.diag(Av)
+        Av = np.zeros(len(vs))
+        [np.add.at(Av, ts[:,i], Amix[:,i]) for i in range(3)]
+        return scipy.sparse.diags(Av) if scipyFound else np.diag(Av)
+    else:
+        vols = computeTetraVolumes(vs[ts], False)
+
+        Vv = np.zeros(len(vs))
+        [np.add.at(Vv, ts[:,i], vols/4) for i in range(4)]
+
+        return scipy.sparse.diags(Vv) if scipyFound else np.diag(Vv)
 
 def smoothen(vs, ts, nIters = 10, t = None, useCotan = True, volumeHack = True, mpSolve = True, fixBoundary = False):
     if t is None:
