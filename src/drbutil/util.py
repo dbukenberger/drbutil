@@ -1556,6 +1556,25 @@ def computeMassMatrix(vs, ts):
 
         return scipy.sparse.diags(Vv) if scipyFound else np.diag(Vv)
 
+def computeGradMatrix(vs, ts):
+    (n, d), m = vs.shape, len(ts)
+    
+    edgeVecs = vs[ts[:, 1:]] - vs[ts[:, :1]]
+    Pinv = np.linalg.pinv(edgeVecs)
+    C = np.dstack((-Pinv.sum(axis=2)[:,:,None], Pinv))
+
+    #rows = np.tile(np.arange(m*d).reshape(-1,m).T.reshape(m,d,1), ts.shape[1])
+    rows = np.broadcast_to(np.arange(d)[None, :, None] * m + np.arange(m)[:, None, None], C.shape)
+    #cols = np.tile(ts[:,None,:], [1,3,1])
+    cols = np.broadcast_to(ts[:, None, :], C.shape)
+
+    if scipyFound:
+        return scipy.sparse.csr_matrix((C.ravel(), (rows.ravel(), cols.ravel())), shape=(d * m, n))
+    else:
+        G = np.zeros((m, d, n))
+        np.put_along_axis(G, ts[:, None, :], C, axis=2)
+        return G.transpose(1, 0, 2).reshape(d * m, n)
+
 def smoothen(vs, ts, nIters = 10, t = None, useCotan = True, volumeHack = True, mpSolve = True, fixBoundary = False):
     if t is None:
         es = facesToEdges(ts)
