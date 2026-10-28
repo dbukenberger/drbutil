@@ -560,8 +560,8 @@ def generateCapsule(vBot, vTop, r, n = 12, mCyl = 0, mCap = 8, triangulate = Tru
     if (cDir + [0,0,1]).sum() == 0:
         uvsVs[:,-1] *= -1
 
-    cVerts = np.vstack([uvsVs[:n*(mCap//2)+1] + vBot, cylVs, uvsVs[n*(mCap//2)+1:] + vTop])
-    cFaces = uvsFs[:len(uvsFs)//2] + (np.int32(cylFs[:-2]) + n*(mCap//2)+1).tolist() + [f + len(cylVs) for f in uvsFs[len(uvsFs)//2:]]
+    cVerts = np.vstack([uvsVs[:n*(mCap//2-1)+1] + vBot, cylVs, uvsVs[n*(mCap//2)+1:] + vTop])
+    cFaces = uvsFs[:len(uvsFs)//2] + (np.int32(cylFs[:-2]) + n*(mCap//2-1)+1).tolist() + [f + len(cylVs) - n for f in uvsFs[len(uvsFs)//2:]]
     cFaces = facesToTris(cFaces) if triangulate else list(map(np.int32, cFaces))
 
     return cVerts, cFaces
@@ -1488,6 +1488,36 @@ def generateAdjacencyList(ss, mode = 'tri'):
     offsets = [0] + np.cumsum(np.bincount(es[:,-1], minlength = nVerts)).tolist()
     return [es[offsets[i]:offsets[i+1],0] for i in range(nVerts)]
 
+def combFrameField(ts, ms, aList = None): # frames at vertices
+    nIdxs = generateAdjacencyList(ts, 'tri' if ts.shape[1] == 3 else 'tet') if aList is None else aList
+
+    visited = np.zeros(len(ms), np.bool_)
+    mz = np.zeros_like(ms)
+    nCtz = np.zeros(len(ms), np.int32)
+    #order = np.zeros(len(ms), np.int32)
+
+    visited[0] = True
+    nCtz[nIdxs[0]] += 1
+    mz[0] = ms[0]
+
+    toVisit = np.zeros_like(visited)
+    toVisit[nIdxs[0]] = True
+    while toVisit.any():
+        idxz = np.nonzero(toVisit)[0]
+        tIdx = idxz[np.argmax(nCtz[idxz])]
+
+        tnIdxs = np.int32(nIdxs[tIdx])
+        vMsk = visited[tnIdxs]
+        mRef = mz[tnIdxs[vMsk]].mean(axis=0)
+        mz[tIdx] = alignBtoA(mRef, ms[tIdx])
+
+        #order[tIdx] = visited.sum()
+        toVisit[tnIdxs[np.bitwise_not(vMsk)]] = True       
+        toVisit[tIdx] = False
+        visited[tIdx] = True
+        nCtz[nIdxs[tIdx]] += 1
+    return mz
+
 def safeDivide(num, denum):
     vals = num * 0
     np.divide(num, denum, out = vals, where = denum > 0)
@@ -1695,13 +1725,10 @@ def computePrincipalStress(sMat):
     return eVecs.T[o], eVals[o]
 
 def computePrincipalStresses(Ms):
-    nDim = Ms.shape[1]
     sVals, sVecs = np.linalg.eigh(Ms)
     o = np.argsort(np.abs(sVals), axis=1)[:,::-1]
-    sVecs = np.transpose(sVecs, axes=[0,2,1])
-    sVecs = sVecs[np.repeat(np.arange(len(Ms)), nDim).reshape(-1, nDim), o]
-    sVals = np.abs(sVals)[np.repeat(np.arange(len(Ms)), nDim).reshape(-1, nDim), o]
-    return sVecs, sVals
+    sVecs = np.take_along_axis(np.swapaxes(sVecs, 1, 2), o[:, :, None], axis=1)
+    return sVecs, np.take_along_axis(np.abs(sVals), o, axis=1)
 
 def projectPoints(pts, o, n, return2d=False):
     vs = pts - o
@@ -1760,6 +1787,30 @@ def resamplePoly(verts, nTarget, isClosed = True):
     sDists = np.linspace(0, csLength[-1], nTarget + isClosed)
     rvs = np.transpose([np.interp(sDists, csLength, v) for v in vs.T])
     return rvs[:-1] if isClosed else rvs
+
+def subdivideEdgesToMaxLength(vs, es, maxLen = None):
+    nVerts = len(vs)
+    eLens = norm(vs[es[:,0]] - vs[es[:,1]])
+    
+    if maxLen is None:
+        maxLen = eLens.mean()
+
+    offset = 0
+    newVerts, newEdges = [], []
+    for eLen, e in zip(eLens, es):
+        if eLen < maxLen:
+            newEdges.append(e)
+        else:
+            nVertsPerEdge = int(np.floor(eLen / maxLen)) + 1
+            vIdxs = [e[0]] + np.repeat((np.arange(nVertsPerEdge-1) + offset + nVerts), 2).tolist() + [e[1]]
+            newEdges.append(np.reshape(vIdxs, (-1, 2)))
+            
+            w = np.linspace(0, 1, nVertsPerEdge+1)[1:-1]
+            ws = np.transpose([1-w, w])
+            newVerts.append(np.dot(ws, vs[e]))
+            offset += nVertsPerEdge - 1
+
+    return np.vstack([vs, np.vstack(newVerts)]), np.vstack(newEdges)
 
 def interpolatePnEdge(vs, ns, alpha = 0.5):
     u, v = 1-alpha, alpha
