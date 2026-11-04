@@ -692,8 +692,10 @@ def generateHexGridHexahedra(n, innerOnly = False):
         return np.empty([0,8], np.int32)
     u,v,w = np.int32([n,n,n] if np.isscalar(n) else n) + [2,2,1] - 2*innerOnly
     ijks = np.stack(np.meshgrid(np.arange(w, dtype=np.int16), np.arange(v-1, dtype=np.int16), np.arange(u-1, dtype=np.int16), indexing='ij'), axis=-1).reshape(-1,3)
-    vIdxs = lambda i: [i, i+u, i+u+u*v, i+u*v, i+1, i+u+1, i+u+u*v+1, i+u*v+1]
-    return np.transpose(vIdxs(np.dot(ijks, [1,u,u*v])))
+    #vIdxs = lambda i: [i, i+u, i+u+u*v, i+u*v, i+1, i+u+1, i+u+u*v+1, i+u*v+1]
+    #return np.transpose(vIdxs(np.dot(ijks, [1,u,u*v])))
+    vIdxs = lambda i: [i, i+u, i+u+1, i+1, i+u*v, i+u+u*v, i+u+1+u*v, i+1+u*v]
+    return np.transpose(vIdxs(np.dot(ijks, [u*v, u, 1])))
 
 def generateTriGrid(n, in3D = False, innerOnly = False):
     vs = generateTriGridSamples(generatePointsOnCircle(3, in3D), n, innerOnly)
@@ -2083,14 +2085,14 @@ def computeIsoContours(vs, ts, ss, isoValue, t = eps):
 def clipByIsoValues(vs, ts, ss, isoValue, t = eps):
     vIo = ss > isoValue
     tMsk = np.all(vIo[ts], axis=1)
-    ess = facesToEdges(ts, False).reshape(-1,3,2)
+    ess = facesToEdges(ts, False).reshape(-1,ts.shape[1],2)
 
     newVerts = []
     newTris = []
     cutEdgeVertIdxs = {}
     for tIdx, t in enumerate(ts):
         if tMsk[tIdx]:
-            newTris.append(t)
+            newTris += facesToTris([t]).tolist()
         else:
             newFace = []
             for e in ess[tIdx]:
@@ -2115,9 +2117,8 @@ def clipByIsoValues(vs, ts, ss, isoValue, t = eps):
 
             if len(newFace) == 3:
                 newTris.append(newFace)
-            elif len(newFace) == 4:
-                newTris.append([newFace[0], newFace[1], newFace[2]])
-                newTris.append([newFace[2], newFace[3], newFace[0]])
+            elif len(newFace) >= 4:
+                newTris += facesToTris([newFace]).tolist()
             
     vz = np.vstack([vs, newVerts])
     tz = np.int32(newTris)       
