@@ -185,6 +185,30 @@ except ImportError:
     igl = None
 
 
+# simple logging function wrapper
+class LogExecutionTime:
+    def __init__(self, func):
+        self.func = func
+
+    def __get__(self, instance, owner):
+        def wrapper(*args, **kwargs):
+            st = time()
+            result = self.func(instance, *args, **kwargs)
+            t = time() - st
+            funName = self.func.__name__
+            
+            if not hasattr(instance, 'timings'):
+                instance.timings = {}
+
+            if not funName in instance.timings.keys():
+                instance.timings[funName] = t
+            else:
+                instance.timings[funName] += t
+            print('t ' + funName, instance.timings[funName])
+
+            return result
+        return wrapper
+
 # simple logger class
 logging.basicConfig(format='%(message)s')
 class Logger:

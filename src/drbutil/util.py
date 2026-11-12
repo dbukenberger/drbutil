@@ -250,6 +250,11 @@ def matrixToQuaternion(m):
             
     return np.float32([qw,qx,qy,qz])
 
+def mat2coeffs(Ms):
+    return Ms[:,[0,1,0],[0,1,1]] if Ms.shape[1] == 2 else Ms[:,[0,1,2,1,0,0],[0,1,2,2,2,1]]
+
+def coeffs2mat(cs):
+    return cs[:,[0,2,2,1]].reshape(-1,2,2) if cs.shape[1] == 3 else cs[:,[0,5,4,5,1,3,4,3,2]].reshape(-1,3,3)
 
 # basic geometry and utility functions
 
@@ -270,12 +275,17 @@ def normVec(v, withLen = False):
 def norm(v): return np.sqrt(np.dot(v, v) if v.ndim == 1 else inner1d(v, v))
 
 def normZeroToOne(data, axis = None):
+    if not len(data):
+        return data
     if type(data) == list:
         data = np.float32(data)
     if axis is not None and data.ndim > 1:
-        return (data - np.min(data, axis=axis)[:,None])/(np.max(data, axis=axis) - np.min(data, axis=axis))[:,None]
+        dMins = np.min(data, axis=axis, keepdims=True)
+        dMaxs = np.max(data, axis=axis, keepdims=True)
     else:
-        return (data - np.min(data))/(np.max(data) - np.min(data)) if len(data) else data
+        dMins = np.min(data)
+        dMaxs = np.max(data)
+    return (data - dMins) / (dMaxs - dMins)
 
 def centerAndScaleToBB(pts, BB = None, keepProportions = True):
     if BB is None:
@@ -694,7 +704,7 @@ def generateHexGridHexahedra(n, innerOnly = False):
     ijks = np.stack(np.meshgrid(np.arange(w, dtype=np.int16), np.arange(v-1, dtype=np.int16), np.arange(u-1, dtype=np.int16), indexing='ij'), axis=-1).reshape(-1,3)
     #vIdxs = lambda i: [i, i+u, i+u+u*v, i+u*v, i+1, i+u+1, i+u+u*v+1, i+u*v+1]
     #return np.transpose(vIdxs(np.dot(ijks, [1,u,u*v])))
-    vIdxs = lambda i: [i, i+u, i+u+1, i+1, i+u*v, i+u+u*v, i+u+1+u*v, i+1+u*v]
+    vIdxs = lambda i: [i+u*v, i+u+u*v, i+u+1+u*v, i+1+u*v, i, i+u, i+u+1, i+1]
     return np.transpose(vIdxs(np.dot(ijks, [u*v, u, 1])))
 
 def generateTriGrid(n, in3D = False, innerOnly = False):
@@ -2198,12 +2208,8 @@ def voxelize(vs, ts, maxRes = 128, returnAs = 'hexa'):
     bb = mnmx(vs)
     ext = np.dot([-1,1], bb)
     res = np.int32(np.round(ext/ext.max() * maxRes))
-
-    vz, hz = generateHexGrid(maxRes-1)
-    vz = np.int32((vz+1)/2 * maxRes)
-    dimMask = np.all([vz[:,d] <= res[d]+eps for d in range(3)], axis=0)
-    vz = vz[dimMask]
-    hz = reIndexIndices(hz[dimMask[hz].all(axis=1)])
+    vz, hz = generateHexGrid(res-1)
+    vz = normZeroToOne(vz, axis=0) * res
 
     hexCenters = vz[hz].mean(axis=1) if returnAs == 'hexa' else np.abs([0, res[1], 0] - vz[hz].mean(axis=1))
     hexCenters = hexCenters.reshape(res[0], res[1], res[2], 3)
