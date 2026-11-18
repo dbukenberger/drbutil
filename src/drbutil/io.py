@@ -119,7 +119,7 @@ def writeObjFile(fileName, vertices, faces, edges=[], comment='', subTags=[], ro
             fh.write('o %s\n' % os.path.basename(fileName)[:-4])
             for vertex in vertices:
                 if roundFloats:
-                    fh.write('v %0.6f %0.6f %0.6f\n' % tuple(vertex))
+                    fh.write(('v' + ' %0.6f' * len(vertex) + '\n') % tuple(vertex))
                 else:
                     fh.write('v ' + ' '.join(map(str, vertex)) + '\n')
             for face in faces:
@@ -132,7 +132,7 @@ def writeObjFile(fileName, vertices, faces, edges=[], comment='', subTags=[], ro
                 fh.write('o %s\n' % tag)
                 for vertex in vertices[subIdx]:
                     if roundFloats:
-                        fh.write('v %0.6f %0.6f %0.6f\n' % tuple(vertex))
+                        fh.write(('v' + ' %0.6f' * len(vertex) + '\n') % tuple(vertex))
                     else:
                         fh.write('v ' + ' '.join(map(str, vertex)) + '\n')
                 if len(faces):

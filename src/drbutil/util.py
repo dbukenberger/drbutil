@@ -2035,6 +2035,32 @@ def vecsToOrthoMatrix(vs): # experimental
         vs = np.float32([computeAvgDirection(b) for b in vBuckets])
     return orthogonalizeMatrix(normVec(vs))
 
+def marchingTets(vs, ts, ss, iso):
+    tab = np.int32([[[-1,-1,-1],[-1,-1,-1]],[[0,4,5],[-1,-1,-1]],[[0,3,1],[-1,-1,-1]],[[4,3,1],[4,5,3]],[[4,1,2],[-1,-1,-1]],[[0,1,2],[0,2,5]],[[0,2,4],[0,3,2]],[[5,3,2],[-1,-1,-1]]])
+    mtLUT = np.vstack([tab, tab[::-1, :, ::-1]])
+    
+    bits = (ss > iso)[ts] @ np.array([1,2,4,8])
+    te = mtLUT[bits]
+    teMsk = te[..., 0] >= 0
+    ti = np.nonzero(teMsk)[0]
+    te = te[teMsk]
+
+    tetEdges = tetToEdges(np.arange(4))
+    tIdxs = np.repeat(ti[:,None], 2, 1)[:,:,None]
+    vIdxs = tetEdges[np.repeat(te[:,None], 2, axis=1), [[0],[1]]]
+    es = np.vstack(np.swapaxes(ts[tIdxs,vIdxs], 2, 1))
+    es.sort(axis=1)
+
+    esHashs = cantorPiV(es)
+    esHashUnique, eIdxs, vIdxs = np.unique(esHashs, return_index=True, return_inverse=True)
+
+    vIdx, vJdx = es[eIdxs].T
+    t = (iso - ss[vIdx]) / (ss[vJdx] - ss[vIdx])
+    vz = vs[vIdx] + t[:, None] * (vs[vJdx] - vs[vIdx])
+    tz = vIdxs.reshape(-1, 3)
+
+    return vz, tz
+
 def computeIsoContours(vs, ts, ss, isoValue, t = eps):
     vIoMsk = ss > isoValue
     vXoMsk = np.abs(ss - isoValue) < t
